@@ -270,3 +270,29 @@ body{margin:0}
 .avatar img{width:100%;height:100%;object-fit:cover}
 .logout-btn:hover{color:var(--bad);border-color:var(--bad-soft)}
 .side .logout-btn{justify-content:flex-start}
+
+/* my money (accounts) */
+.acctgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.acct{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:16px;border-radius:16px;border:1.5px solid var(--line);background:var(--surface);min-height:128px;min-width:0;transition:border-color .15s,background .15s}
+.acct:hover{border-color:var(--track)}
+.acct[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.acct .top{display:flex;align-items:center;gap:10px;width:100%;min-width:0}
+.acct .nm{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct .bal{font-size:24px;font-weight:800;letter-spacing:-.02em}
+.acct small{font-size:12px;color:var(--muted)}
+.acct.new{border-style:dashed;align-items:center;justify-content:center;color:var(--muted);font-weight:700}
+.acct.new:hover{color:var(--accent);border-color:var(--accent)}
+.ai{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none}
+.neg{color:var(--bad) !important}
+.amt.pos{color:var(--accent)}
+.moneyrow{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.mchip{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--sunk);color:var(--fg);text-decoration:none;min-width:0;min-height:56px}
+.mchip:hover{background:var(--accent-soft)}
+.mchip .t{display:flex;flex-direction:column;min-width:0}
+.mchip .t span{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mchip .t b{font-weight:800}
+.btn.danger{color:var(--bad)}
+@media (max-width:760px){.acctgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.acct{padding:12px;min-height:116px}.acct .bal{font-size:19px}.moneyrow{grid-template-columns:repeat(2,minmax(0,1fr))}}
+#view{display:flex;flex-direction:column;gap:20px;min-width:0}
+#view>:empty{display:none}
+@media (max-width:760px){#view{gap:16px}}

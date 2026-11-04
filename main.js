@@ -23,10 +23,17 @@ function newId(){return Date.now().toString(36)+Math.random().toString(36).slice
 
 const ICON_REPEAT='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg>';
 const ICON_EDIT='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>';
-const S={db:null,live:false,cards:{},expenses:{},recurring:{},settings:null,loaded:{},made:new Set(),running:false,
+const S={db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),running:false,seeding:false,acct:null,
   view:'overview',month:ym(new Date()),tab:'Virtual',sel:null,faceId:null,
   fCat:'all',fCard:'all',confirm:null,pending:false};
-const VIEWS=['overview','stats','cards','budgets','activity'];
+const VIEWS=['overview','accounts','stats','cards','budgets','activity'];
+const ACCT_TYPES={
+  cash:{label:'Cash',color:'var(--c3)',path:'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>'},
+  bank:{label:'Bank',color:'var(--c1)',path:'<path d="M3 10h18L12 4z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>'},
+  savings:{label:'Savings',color:'var(--c4)',path:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>'},
+  emergency:{label:'Emergency fund',color:'var(--c8)',path:'<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="M12 9v6M9 12h6"/>'},
+  other:{label:'Others',color:'var(--c7)',path:'<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><path d="M16 14h.01"/>'}};
+const DEFAULT_ACCTS=[['cash','Cash'],['bank','Bank'],['savings','Savings'],['emergency','Emergency fund'],['other','Others']];
 
 function cats(){return (S.settings&&Array.isArray(S.settings.categories)&&S.settings.categories.length)?S.settings.categories:DEFAULT_CATS}
 function cur(){return (S.settings&&S.settings.currency)||'NT$'}
@@ -43,6 +50,47 @@ function dim(m){const [y,mo]=m.split('-').map(Number);return new Date(y,mo,0).ge
 function addMonths(m,n){const [y,mo]=m.split('-').map(Number);return ym(new Date(y,mo-1+n,1))}
 function ordinal(n){const s=['th','st','nd','rd'],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])}
 function recList(){return Object.entries(S.recurring).map(([id,r])=>Object.assign({id},r)).sort((a,b)=>(a.day||0)-(b.day||0))}
+function acctList(){return Object.entries(S.accounts).map(([id,a])=>Object.assign({id},a)).sort((a,b)=>(a.order||0)-(b.order||0))}
+function moveList(){return Object.entries(S.moves).map(([id,m])=>Object.assign({id},m))}
+function acctIcon(type,cls){const T=ACCT_TYPES[type]||ACCT_TYPES.other;return '<span class="'+(cls||'ai')+'" style="color:'+T.color+';background:color-mix(in srgb,'+T.color+' 15%,transparent)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+T.path+'</svg></span>'}
+/* Balance = starting amount + money added + transfers in − transfers out − expenses paid from it. */
+function balance(id){
+  const a=S.accounts[id];if(!a)return 0;let b=Number(a.start)||0;
+  moveList().forEach(m=>{const v=Number(m.amount)||0;if(m.kind==='transfer'){if(m.toId===id)b+=v;if(m.fromId===id)b-=v}else if(m.toId===id)b+=v});
+  expList().forEach(e=>{if(e.accountId===id)b-=Number(e.amount)||0});
+  return Math.round(b*100)/100;
+}
+function acctFlow(id,m){
+  let inn=0,out=0;
+  moveList().forEach(x=>{if(!String(x.date||'').startsWith(m))return;const v=Number(x.amount)||0;
+    if(x.kind==='transfer'){if(x.toId===id)inn+=v;if(x.fromId===id)out+=v}
+    else if(x.toId===id){if(v>=0)inn+=v;else out-=v}});
+  expList().forEach(e=>{if(e.accountId===id&&String(e.date||'').startsWith(m))out+=Number(e.amount)||0});
+  return {inn,out};
+}
+function totalMoney(){return acctList().reduce((s,a)=>s+balance(a.id),0)}
+function acctName(id){const a=S.accounts[id];return a?a.name:'Removed account'}
+function paidLabel(x){const card=S.cards[x.cardId];if(card)return esc(card.name)+' ··'+esc(card.last4||'');if(x.cardId)return 'Removed card';const a=S.accounts[x.accountId];return a?esc(a.name):'Cash / other'}
+function payOptions(cur){
+  const cl=cardList(),al=acctList();let h='';
+  if(al.length)h+='<optgroup label="Money">'+al.map(a=>'<option value="a:'+a.id+'"'+(cur==='a:'+a.id?' selected':'')+'>'+esc(a.name)+' · '+esc(money(balance(a.id)))+' left</option>').join('')+'</optgroup>';
+  if(cl.length)h+='<optgroup label="Cards">'+cl.map(c=>'<option value="c:'+c.id+'"'+(c.frozen?' disabled':'')+(cur==='c:'+c.id?' selected':'')+'>'+esc(c.name)+' ··'+esc(c.last4||'')+(c.frozen?' (frozen)':c.accountId&&S.accounts[c.accountId]?' · from '+esc(S.accounts[c.accountId].name):'')+'</option>').join('')+'</optgroup>';
+  h+='<option value=""'+(!cur?' selected':'')+'>Not tracked</option>';
+  return h;
+}
+function payValue(x){return x.cardId?'c:'+x.cardId:x.accountId?'a:'+x.accountId:''}
+function readPay(v){v=v||'';if(v.startsWith('c:')){const id=v.slice(2),c=S.cards[id];return {cardId:id,accountId:(c&&c.accountId)||''}}if(v.startsWith('a:'))return {cardId:'',accountId:v.slice(2)};return {cardId:'',accountId:''}}
+function defaultPay(){
+  if(S.lastPay&&(S.lastPay.startsWith('a:')?S.accounts[S.lastPay.slice(2)]:S.cards[S.lastPay.slice(2)]&&!S.cards[S.lastPay.slice(2)].frozen))return S.lastPay;
+  if(S.accounts.cash)return 'a:cash';const a=acctList()[0];return a?'a:'+a.id:'';
+}
+function seedAccounts(){
+  if(S.seeding||!S.loaded.accts||!S.loaded.set||!S.db)return;
+  if(Object.keys(S.accounts).length||(S.settings&&S.settings.accountsSeeded))return;
+  S.seeding=true;
+  DEFAULT_ACCTS.forEach(([type,name],i)=>put('accounts',type,{name,type,start:0,order:i+1,createdAt:Date.now()}));
+  saveSettings({accountsSeeded:true});
+}
 function dueDate(r,m){return m+'-'+String(Math.min(r.day||1,dim(m))).padStart(2,'0')}
 function recStatus(r,m){
   const e=S.expenses['r-'+r.id+'-'+m];
@@ -67,7 +115,8 @@ function runRecurring(){
         const id='r-'+r.id+'-'+m,due=dueDate(r,m),card=S.cards[r.cardId];
         if(due<=td&&!S.expenses[id]&&!S.made.has(id)&&!(r.skipped||[]).includes(m)&&!(card&&card.frozen)){
           S.made.add(id);
-          put('expenses',id,{amount:Number(r.amount),category:r.category,cardId:r.cardId||'',note:r.note||'',date:due,createdAt:Date.now(),recurringId:r.id,example:!!r.example});
+          const acc=r.cardId&&card?(card.accountId||''):(r.accountId||'');
+          put('expenses',id,{amount:Number(r.amount),category:r.category,cardId:r.cardId||'',accountId:acc,note:r.note||'',date:due,createdAt:Date.now(),recurringId:r.id,example:!!r.example});
         }
         m=addMonths(m,1);
       }
@@ -86,7 +135,7 @@ function put(col,id,data){if(S.db)S.db.put(col,id,data).catch(e=>toast(errMsg(e)
 function patch(col,id,data){if(S.db)S.db.patch(col,id,data).catch(e=>toast(errMsg(e)))}
 function del(col,id){if(S.db)S.db.del(col,id).catch(e=>toast(errMsg(e)))}
 function saveSettings(partial){
-  const next=Object.assign({currency:cur(),categories:cats(),example:!!(S.settings&&S.settings.example)},partial);
+  const next=Object.assign({},S.settings||{},{currency:cur(),categories:cats(),example:!!(S.settings&&S.settings.example)},partial);
   if(S.db)S.db.put('settings','moss',next).catch(e=>toast(errMsg(e)));
 }
 function setSync(state){
@@ -98,7 +147,7 @@ function setSync(state){
 let unsubs=[];
 function disconnect(){
   unsubs.forEach(u=>{try{u()}catch(e){}});unsubs=[];
-  Object.assign(S,{db:null,live:false,cards:{},expenses:{},recurring:{},settings:null,loaded:{},made:new Set(),sel:null,faceId:null,confirm:null});
+  Object.assign(S,{db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),seeding:false,acct:null,lastPay:null,sel:null,faceId:null,confirm:null});
   $('#view').innerHTML='';$('#view').dataset.view='';closeModal();
 }
 function connect(uid){
@@ -109,7 +158,9 @@ function connect(uid){
   unsubs.push(store.subscribe('cards',onCol('cards','cards'),fail));
   unsubs.push(store.subscribe('expenses',onCol('expenses','exp'),fail));
   unsubs.push(store.subscribe('recurring',onCol('recurring','rec'),fail));
-  unsubs.push(store.subscribeDoc('settings','moss',d=>{S.settings=d;render()},fail));
+  unsubs.push(store.subscribe('accounts',onCol('accounts','accts'),fail));
+  unsubs.push(store.subscribe('moves',onCol('moves','moves'),fail));
+  unsubs.push(store.subscribeDoc('settings','moss',d=>{S.settings=d;S.loaded.set=true;render()},fail));
   render();
 }
 window.addEventListener('offline',()=>{if(S.db)setSync('offline')});
@@ -117,7 +168,7 @@ window.addEventListener('online',()=>{if(S.db)setSync('live')});
 
 /* ---------- render ---------- */
 function render(){
-  runRecurring();
+  runRecurring();seedAccounts();
   const view=$('#view'),a=document.activeElement;
   if(a&&view.contains(a)&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)){S.pending=true;return}
   S.pending=false;
@@ -125,12 +176,12 @@ function render(){
   document.querySelectorAll('.m-label').forEach(el=>el.textContent=monthLabel(S.month,el.closest('.mtop')));
   const ex=monthExp();$('#m-total').textContent=money(sum(ex))+' this month';
   const h=new Date().getHours();$('#greet').textContent=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
-  $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
+  $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',accounts:'My money',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
   $('#tip').hidden=true;
   if(S.view==='cards'){renderCards();return}
   view.dataset.view=S.view;
   if(S.view==='stats'){view.innerHTML=vStats();fillStats();return}
-  view.innerHTML=S.view==='budgets'?vBudgets():S.view==='activity'?vActivity():vOverview();
+  view.innerHTML=S.view==='accounts'?vAccounts():S.view==='budgets'?vBudgets():S.view==='activity'?vActivity():vOverview();
 }
 
 /* ---------- statistics ---------- */
@@ -255,7 +306,7 @@ function exampleBanner(){
 function localBanner(){return ''}
 function txnRow(e,withDel){
   const card=S.cards[e.cardId];const c=catColor(e.category);
-  const sub=(e.recurringId?'Monthly · ':'')+esc(catName(e.category))+' · '+(card?esc(card.name)+' ··'+esc(card.last4||''):e.cardId?'Removed card':'Cash / other')+(withDel?'':' · '+dayLabel(e.date));
+  const sub=(e.recurringId?'Monthly · ':'')+esc(catName(e.category))+' · '+paidLabel(e)+(withDel?'':' · '+dayLabel(e.date));
   let right='<span class="amt num">−'+esc(money(e.amount))+'</span>';
   if(withDel){
     right+=S.confirm==='exp:'+e.id
@@ -280,9 +331,14 @@ function vOverview(){
   html+='<section class="hero" aria-label="Month summary"><div class="main"><span class="muted" style="font-weight:600">Spent in '+esc(mname)+'</span><span class="big num">'+esc(money(spent))+'</span>'
     +(budget>0?'<span class="muted num">of '+esc(money(budget))+' budget'+(p>100?' · <span class="pill bad">Over by '+esc(money(-left))+'</span>':'')+'</span><div class="bar"><i class="'+pctClass(p)+'" style="width:'+Math.min(100,p)+'%"></i></div>':'<span class="muted">No budget set yet. <a href="#budgets" style="color:var(--accent);font-weight:700">Set your budgets</a></span>')
     +'</div><div class="stats"><div class="stat"><span>Left to spend</span><b class="num" style="color:'+(left<0?'var(--bad)':'var(--fg)')+'">'+esc(money(Math.max(0,left)))+'</b></div><div class="stat"><span>'+(daysLeft>0?'Per day · '+daysLeft+' days left':'Month closed')+'</span><b class="num">'+(daysLeft>0?esc(money(perDay)):'—')+'</b></div><div class="stat"><span>Monthly bills still coming</span><b class="num">'+esc(money(upSum))+'</b></div></div></section>';
+  const al=acctList();
+  if(al.length){
+    html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>YOUR MONEY · <span class="num" style="color:var(--fg)">'+esc(money(totalMoney()))+'</span></h2><a href="#accounts" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div><div class="moneyrow">'
+      +al.map(a=>{const b=balance(a.id);return '<a class="mchip" href="#accounts" data-act="go-acct" data-id="'+esc(a.id)+'">'+acctIcon(a.type)+'<span class="t"><span>'+esc(a.name)+'</span><b class="num'+(b<0?' neg':'')+'">'+esc(money(b))+'</b></span></a>'}).join('')+'</div></section>';
+  }
   if(upcoming.length){
     html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>COMING UP IN '+esc(mname.toUpperCase())+'</h2><a href="#budgets" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div><div>'
-      +upcoming.map(({r,st})=>{const card=S.cards[r.cardId];return '<div class="txn"><span class="ic" style="color:var(--warn);background:var(--warn-soft)">'+ICON_REPEAT+'</span><div class="tx"><b>'+esc(r.note||catName(r.category))+'</b><span>'+esc(catName(r.category))+' · '+(card?esc(card.name):'Cash / other')+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span></div>'}).join('')
+      +upcoming.map(({r,st})=>{return '<div class="txn"><span class="ic" style="color:var(--warn);background:var(--warn-soft)">'+ICON_REPEAT+'</span><div class="tx"><b>'+esc(r.note||catName(r.category))+'</b><span>'+esc(catName(r.category))+' · '+paidLabel(r)+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span></div>'}).join('')
       +'</div><p class="muted" style="margin:0;font-size:12px">The per-day amount above already sets these aside.</p></section>';
   }
   const byCat=cats().map(c=>({c,s:sum(ex.filter(e=>e.category===c.id))}));
@@ -294,7 +350,7 @@ function vOverview(){
     +(other>0?'<div class="catrow"><span class="nm"><span class="dot" style="background:var(--c8)"></span><span>Uncategorized</span></span><span class="num"><b>'+esc(money(other))+'</b></span></div>':'')
     +'</div></section>';
   const recent=ex.slice(0,6);
-  html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center"><h2>RECENT</h2>'+(ex.length>6?'<a href="#activity" style="color:var(--accent);font-weight:700;font-size:13px">See all</a>':'')+'</div>'
+  html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center"><h2>RECENT</h2>'+(ex.length?'<a href="#activity" style="color:var(--accent);font-weight:700;font-size:13px">See all</a>':'')+'</div>'
     +(recent.length?'<div>'+recent.map(e=>txnRow(e,false)).join('')+'</div>':'<div class="empty"><b>No expenses in '+esc(mname)+' yet</b>Tap Add expense to log your first one.</div>')+'</section></div>';
   const cl=cardList();
   if(cl.length){
@@ -304,6 +360,46 @@ function vOverview(){
   return html;
 }
 
+function moneyRow(r){
+  const pos=r.amt>=0;
+  const del=r.moveId?(S.confirm==='move:'+r.moveId
+    ?'<button class="btn small danger solid" data-act="del-move" data-id="'+r.moveId+'">Delete</button><button class="btn small" data-act="cancel">Keep</button>'
+    :'<button class="iconbtn" data-act="ask" data-key="move:'+r.moveId+'" aria-label="Delete this entry">'+ICON_TRASH+'</button>'):'';
+  return '<div class="txn"><span class="ic" style="color:'+(pos?'var(--accent)':'var(--warn)')+';background:'+(pos?'var(--accent-soft)':'var(--warn-soft)')+'">'+(pos?'+':'−')+'</span><div class="tx"><b>'+esc(r.title)+'</b><span>'+esc(r.sub)+'</span></div><span class="amt num'+(pos?' pos':'')+'">'+(pos?'+':'−')+esc(money(Math.abs(r.amt)))+'</span>'+del+'</div>';
+}
+function acctHistory(id,m){
+  const rows=[];
+  moveList().forEach(x=>{if(!String(x.date||'').startsWith(m))return;const v=Number(x.amount)||0,d=dayLabel(x.date);
+    if(x.kind==='transfer'){
+      if(x.toId===id)rows.push({date:x.date,c:x.createdAt,amt:v,title:x.note||'From '+acctName(x.fromId),sub:'Transfer from '+acctName(x.fromId)+' · '+d,moveId:x.id});
+      if(x.fromId===id)rows.push({date:x.date,c:x.createdAt,amt:-v,title:x.note||'To '+acctName(x.toId),sub:'Transfer to '+acctName(x.toId)+' · '+d,moveId:x.id});
+    }else if(x.toId===id)rows.push({date:x.date,c:x.createdAt,amt:v,title:x.note||(x.kind==='adjust'?'Balance correction':'Money added'),sub:(x.kind==='adjust'?'Correction':'Added')+' · '+d,moveId:x.id});
+  });
+  expList().forEach(e=>{if(e.accountId===id&&String(e.date||'').startsWith(m))rows.push({date:e.date,c:e.createdAt,amt:-(Number(e.amount)||0),title:e.note||catName(e.category),sub:'Expense · '+catName(e.category)+(S.cards[e.cardId]?' · '+S.cards[e.cardId].name:'')+' · '+dayLabel(e.date)})});
+  return rows.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.c||0)-(a.c||0));
+}
+function vAccounts(){
+  const al=acctList(),m=S.month,mname=monthLabel(m).split(' ')[0];
+  if(!S.acct||!S.accounts[S.acct])S.acct=al[0]?al[0].id:null;
+  let html='<div class="headrow"><div><h1>My money</h1><p>How much is left in each place. Expenses, money you add and transfers update these automatically.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="money-in">+ Add money</button><button class="btn" data-act="money-tr">'+ICON_REPEAT+'Transfer</button></div></div>';
+  if(!al.length)return html+'<div class="empty"><b>'+(S.loaded.accts?'No accounts yet':'Loading your accounts…')+'</b>'+(S.loaded.accts?'<button class="btn primary" style="margin-top:10px" data-act="new-acct">New account</button>':'')+'</div>';
+  let tin=0,tout=0;al.forEach(a=>{const f=acctFlow(a.id,m);tin+=f.inn;tout+=f.out});
+  const tot=totalMoney();
+  html+='<section class="hero" aria-label="Total money"><div class="main"><span class="muted" style="font-weight:600">Total money left</span><span class="big num'+(tot<0?' neg':'')+'">'+esc(money(tot))+'</span><span class="muted">Across '+al.length+' account'+(al.length>1?'s':'')+'</span></div>'
+    +'<div class="stats"><div class="stat"><span>Came in · '+esc(mname)+'</span><b class="num" style="color:var(--accent)">+'+esc(money(tin))+'</b></div><div class="stat"><span>Went out · '+esc(mname)+'</span><b class="num">−'+esc(money(tout))+'</b></div></div></section>';
+  html+='<div class="acctgrid">'+al.map(a=>{const b=balance(a.id),f=acctFlow(a.id,m);
+    return '<button class="acct" data-act="pick-acct" data-id="'+esc(a.id)+'" aria-pressed="'+(S.acct===a.id)+'"><span class="top">'+acctIcon(a.type)+'<span class="nm">'+esc(a.name)+'</span>'+(b<0?'<span class="pill bad">Below zero</span>':'')+'</span><span class="bal num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span><small class="num">+'+esc(money(f.inn))+' in · −'+esc(money(f.out))+' out in '+esc(mname)+'</small></button>'}).join('')
+    +'<button class="acct new" data-act="new-acct">+ New account</button></div>';
+  const a=S.accounts[S.acct];
+  if(a){
+    const rows=acctHistory(S.acct,m);
+    html+='<section class="panel"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px"><div style="display:flex;align-items:center;gap:10px">'+acctIcon(a.type)+'<div><h2>'+esc(a.name.toUpperCase())+' · '+esc(mname.toUpperCase())+'</h2><b class="num" style="font-size:18px">'+esc(money(balance(S.acct)))+' left</b></div></div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn small primary" data-act="money-in" data-id="'+esc(S.acct)+'">+ Add money</button><button class="btn small" data-act="money-tr" data-id="'+esc(S.acct)+'">Transfer</button><button class="btn small" data-act="edit-acct" data-id="'+esc(S.acct)+'">'+ICON_EDIT+'Edit</button></div></div>'
+      +(rows.length?'<div>'+rows.map(moneyRow).join('')+'</div>':'<div class="empty"><b>Nothing in '+esc(mname)+' yet</b>Money you add, transfers and expenses paid from '+esc(a.name)+' show up here.</div>')
+      +'<p class="muted" style="margin:0;font-size:12px">Delete expenses from Activity. Deleting an entry here puts its amount back.</p></section>';
+  }
+  return html;
+}
 function vActivity(){
   let ex=monthExp();
   if(S.fCat!=='all')ex=ex.filter(e=>e.category===S.fCat);
@@ -326,7 +422,7 @@ function vBudgets(){
       const actions=S.confirm==='rec:'+r.id
         ?'<button class="btn small danger solid" data-act="del-rec" data-id="'+r.id+'">Delete</button><button class="btn small" data-act="cancel">Keep</button>'
         :'<button class="btn small" data-act="toggle-rec" data-id="'+r.id+'">'+(paused?'Resume':'Pause')+'</button><button class="iconbtn" style="color:var(--muted)" data-act="edit-rec" data-id="'+r.id+'" aria-label="Edit '+esc(r.note||'recurring expense')+'">'+ICON_EDIT+'</button><button class="iconbtn" data-act="ask" data-key="rec:'+r.id+'" aria-label="Delete '+esc(r.note||'recurring expense')+'">'+ICON_TRASH+'</button>';
-      return '<div class="txn" style="flex-wrap:wrap;'+(paused?'opacity:.65':'')+'"><span class="ic" style="color:var(--accent);background:var(--accent-soft)">'+ICON_REPEAT+'</span><div class="tx" style="flex:1 1 160px"><b>'+esc(r.note||catName(r.category))+'</b><span>Every month on the '+ordinal(r.day||1)+' · '+esc(catName(r.category))+' · '+(card?esc(card.name)+' ··'+esc(card.last4||''):r.cardId?'Removed card':'Cash / other')+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span><span style="display:flex;gap:6px;margin-left:auto">'+actions+'</span></div>'}).join('')+'</div>'
+      return '<div class="txn" style="flex-wrap:wrap;'+(paused?'opacity:.65':'')+'"><span class="ic" style="color:var(--accent);background:var(--accent-soft)">'+ICON_REPEAT+'</span><div class="tx" style="flex:1 1 160px"><b>'+esc(r.note||catName(r.category))+'</b><span>Every month on the '+ordinal(r.day||1)+' · '+esc(catName(r.category))+' · '+paidLabel(r)+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span><span style="display:flex;gap:6px;margin-left:auto">'+actions+'</span></div>'}).join('')+'</div>'
       +(S.confirm&&S.confirm.startsWith('rec:')?'<p class="muted" style="margin:0;font-size:13px">Deleting stops future months. Expenses already logged stay in Activity.</p>':'')
     :'<div class="empty"><b>No recurring expenses yet</b>Add rent, subscriptions or bills once and they get logged for you each month.</div>')
     +'</section>';
@@ -351,6 +447,7 @@ function renderCards(){
      +'<div class="frost" id="cv-frost" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2v20M4.9 6l14.2 12M19.1 6 4.9 18M9 3.5l3 2.5 3-2.5M9 20.5l3-2.5 3 2.5"/></svg>Card frozen</div></div>'
      +'<div class="info"><span id="cv-status"></span><div><h2 id="cv-name"></h2><span class="muted" id="cv-desc" style="font-size:13px"></span></div>'
      +'<button class="freeze" id="cv-freeze" data-act="freeze"><span class="fi">'+ICON_SNOW+'</span><span class="ft"><b id="cv-ft"></b><span id="cv-fs"></span></span><span class="switch" id="cv-switch"><i></i></span></button>'
+     +'<label class="field" for="cv-acct">Pays from<select id="cv-acct" class="input"></select></label>'
      +'<div id="cv-remove"></div></div></div>'
      +'<div class="grid2"><section class="panel" id="cv-limit"><h2>MONTHLY LIMIT</h2><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span class="muted" style="font-size:13px">Spent in <span id="cv-mon"></span></span><span class="num"><b id="cv-spent"></b> <span class="muted">of <span id="cv-lim"></span></span></span></div><div class="bar"><i id="cv-bar"></i></div><label class="field" for="cv-range">Adjust limit<input type="range" id="cv-range" min="0" step="500"></label><div class="presets" id="cv-presets"></div></section>'
      +'<section class="panel"><h2>WHERE IT WENT</h2><div id="cv-split"></div></section></div>'
@@ -381,6 +478,7 @@ function renderCards(){
   $('#cv-switch').classList.toggle('on',!!c.frozen);
   $('#cv-ft').textContent=c.frozen?'Unfreeze card':'Freeze card';
   $('#cv-fs').textContent=c.frozen?"You can't log new expenses on it until you unfreeze it":'Blocks new expenses on this card until you unfreeze it';
+  $('#cv-acct').innerHTML=acctOptions(c.accountId||'')+'<option value=""'+(c.accountId?'':' selected')+'>Not tracked</option>';
   $('#cv-remove').innerHTML=S.confirm==='card:'+c.id?'<div class="banner" style="background:var(--bad-soft)"><p>Remove <b>'+esc(c.name)+'</b>? Its past expenses stay in Activity.</p><button class="btn small danger solid" data-act="del-card" data-id="'+c.id+'">Remove card</button><button class="btn small" data-act="cancel">Keep</button></div>':'<button class="btn small danger" data-act="ask" data-key="card:'+c.id+'">'+ICON_TRASH+'Remove card</button>';
   const cex=ex.filter(e=>e.cardId===c.id),spent=sum(cex),lim=Number(c.limit)||0;
   $('#cv-mon').textContent=monthLabel(S.month).split(' ')[0];
@@ -397,16 +495,39 @@ function renderCards(){
 function openModal(html,focusSel){$('#modal').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">'+html+'</div></div>';setTimeout(()=>{const f=$(focusSel||'#modal input');if(f)f.focus()},30)}
 function closeModal(){$('#modal').innerHTML='';if(S.pending)render()}
 function openAdd(){
-  const cl=cardList();
-  const def=cl.find(c=>c.id===S.sel&&!c.frozen)||cl.find(c=>!c.frozen);
   openModal('<h2>Add expense</h2><form id="f-add" novalidate>'
    +'<label class="field" for="a-amt">Amount ('+esc(cur())+')<input id="a-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" required></label>'
    +'<div class="two"><label class="field" for="a-cat">Category<select id="a-cat" class="input">'+cats().map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join('')+'</select></label>'
    +'<label class="field" for="a-date">Date<input id="a-date" class="input" type="date" value="'+(S.month===ym(new Date())?today():S.month+'-01')+'" required></label></div>'
-   +'<label class="field" for="a-card">Paid with<select id="a-card" class="input">'+cl.map(c=>'<option value="'+c.id+'"'+(c.frozen?' disabled':'')+(def&&def.id===c.id?' selected':'')+'>'+esc(c.name)+' ··'+esc(c.last4||'')+(c.frozen?' (frozen)':'')+'</option>').join('')+'<option value=""'+(def?'':' selected')+'>Cash / other</option></select></label>'
+   +'<label class="field" for="a-pay">Paid from<select id="a-pay" class="input">'+payOptions(defaultPay())+'</select></label>'
    +'<label class="field" for="a-note">Note<input id="a-note" class="input" maxlength="80" placeholder="e.g. Lunch with client"></label>'
    +'<label for="a-rep" style="display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 12px;border-radius:12px;background:var(--sunk);font-weight:600;cursor:pointer"><input type="checkbox" id="a-rep" style="width:20px;height:20px;accent-color:var(--accent)"><span style="display:flex;flex-direction:column"><span>Repeat every month</span><span class="muted" id="a-rep-sub" style="font-size:12px;font-weight:500">Logs it automatically on the same day each month</span></span></label>'
    +'<p class="err" id="a-err" hidden></p><div class="actions"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">Add expense</button></div></form>','#a-amt');
+}
+function acctOptions(sel,skip){return acctList().filter(a=>a.id!==skip).map(a=>'<option value="'+esc(a.id)+'"'+(a.id===sel?' selected':'')+'>'+esc(a.name)+' · '+esc(money(balance(a.id)))+'</option>').join('')}
+function openMoney(kind,id){
+  const al=acctList();
+  if(!al.length){toast('Add an account first.');return}
+  const tr=kind==='transfer';
+  const from=id||S.acct||al[0].id;
+  const to=tr?((al.find(a=>a.id!==from&&a.type==='savings')||al.find(a=>a.id!==from)||{}).id):(id||S.acct||al[0].id);
+  if(tr&&al.length<2){toast('You need at least two accounts to transfer.');return}
+  openModal('<h2>'+(tr?'Transfer money':'Add money')+'</h2><form id="f-move" data-kind="'+(tr?'transfer':'in')+'" novalidate>'
+   +'<label class="field" for="m-amt">Amount ('+esc(cur())+')<input id="m-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" required></label>'
+   +(tr?'<div class="two"><label class="field" for="m-from">From<select id="m-from" class="input">'+acctOptions(from)+'</select></label><label class="field" for="m-to">To<select id="m-to" class="input">'+acctOptions(to)+'</select></label></div>'
+       :'<label class="field" for="m-to">Put it in<select id="m-to" class="input">'+acctOptions(to)+'</select></label>')
+   +'<div class="two"><label class="field" for="m-note">Note<input id="m-note" class="input" maxlength="60" placeholder="'+(tr?'e.g. Monthly savings':'e.g. Salary, client payment')+'"></label>'
+   +'<label class="field" for="m-date">Date<input id="m-date" class="input" type="date" value="'+(S.month===ym(new Date())?today():S.month+'-01')+'" required></label></div>'
+   +'<p class="err" id="m-err" hidden></p><div class="actions"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(tr?'Transfer':'Add money')+'</button></div></form>','#m-amt');
+}
+function openAcct(id){
+  const a=id?S.accounts[id]:null;
+  openModal('<h2>'+(a?'Edit '+esc(a.name):'New account')+'</h2><form id="f-acct" data-id="'+esc(id||'')+'" novalidate>'
+   +'<div class="two"><label class="field" for="ac-name">Name<input id="ac-name" class="input" maxlength="30" placeholder="e.g. GCash, BDO, Piggy bank" value="'+esc(a?a.name:'')+'" required></label>'
+   +'<label class="field" for="ac-type">Type<select id="ac-type" class="input">'+Object.entries(ACCT_TYPES).map(([k,T])=>'<option value="'+k+'"'+((a?a.type:'other')===k?' selected':'')+'>'+esc(T.label)+'</option>').join('')+'</select></label></div>'
+   +'<label class="field" for="ac-bal">'+(a?'Current balance':'How much is in it now')+' ('+esc(cur())+')<input id="ac-bal" class="input amount num" type="number" inputmode="decimal" step="any" placeholder="0" value="'+(a?balance(id):'')+'"></label>'
+   +(a?'<p class="muted" style="margin:0;font-size:12px">Changing the balance adds a correction entry, so your history stays right.</p>':'')
+   +'<p class="err" id="ac-err" hidden></p><div class="actions">'+(a?'<button type="button" class="btn danger" data-act="del-acct" data-id="'+esc(id)+'" style="margin-right:auto">'+ICON_TRASH+'Delete</button>':'')+'<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(a?'Save':'Create account')+'</button></div></form>','#ac-name');
 }
 function startOptions(day){
   const cm=ym(new Date()),nm=addMonths(cm,1),r={day};
@@ -420,7 +541,7 @@ function openRec(id){
    +'<label class="field" for="r-amt">Amount each month ('+esc(cur())+')<input id="r-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="'+(r?esc(r.amount):'')+'" required></label>'
    +'<div class="two"><label class="field" for="r-cat">Category<select id="r-cat" class="input">'+cats().map(c=>'<option value="'+esc(c.id)+'"'+(r&&r.category===c.id?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select></label>'
    +'<label class="field" for="r-day">Day of the month<select id="r-day" class="input">'+Array.from({length:31},(_,i)=>i+1).map(d=>'<option value="'+d+'"'+(d===day?' selected':'')+'>'+ordinal(d)+'</option>').join('')+'</select></label></div>'
-   +'<label class="field" for="r-card">Paid with<select id="r-card" class="input">'+cl.map(c=>'<option value="'+c.id+'"'+(r&&r.cardId===c.id?' selected':'')+'>'+esc(c.name)+' ··'+esc(c.last4||'')+(c.frozen?' (frozen)':'')+'</option>').join('')+'<option value=""'+(r&&!r.cardId?' selected':'')+'>Cash / other</option></select></label>'
+   +'<label class="field" for="r-pay">Paid from<select id="r-pay" class="input">'+payOptions(r?payValue(r):defaultPay())+'</select></label>'
    +(r?'<p class="muted" style="margin:0;font-size:12px">Changes apply from the next time it\'s logged. Past months stay as they are.</p>':'<label class="field" for="r-start">First time<select id="r-start" class="input">'+startOptions(day)+'</select></label><p class="muted" style="margin:0;font-size:12px">Days past the end of a short month land on its last day. A frozen card waits until you unfreeze it.</p>')
    +'<p class="err" id="r-err" hidden></p><div class="actions"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(r?'Save changes':'Add recurring')+'</button></div></form>','#r-note');
 }
@@ -429,6 +550,7 @@ function openNewCard(){
    +'<label class="field" for="n-name">Card name<input id="n-name" class="input" maxlength="30" placeholder="e.g. Subscriptions" required></label>'
    +'<div class="two"><label class="field" for="n-kind">Type<select id="n-kind" class="input"><option value="Virtual">Virtual</option><option value="Physical">Physical</option></select></label>'
    +'<label class="field" for="n-last4">Last 4 digits<input id="n-last4" class="input num" inputmode="numeric" maxlength="4" placeholder="Optional"></label></div>'
+   +(acctList().length?'<label class="field" for="n-acct">Pays from<select id="n-acct" class="input">'+acctOptions(S.accounts.bank?'bank':(acctList()[0]||{}).id)+'<option value="">Not tracked</option></select></label>':'')
    +'<label class="field" for="n-limit">Monthly limit ('+esc(cur())+')<input id="n-limit" class="input num" type="number" inputmode="decimal" min="0" step="any" placeholder="0 for no limit"></label>'
    +'<fieldset style="border:0;padding:0;margin:0" class="field"><legend style="margin-bottom:6px">Color</legend><div class="swatches">'+Object.keys(CARD_BG).map((k,i)=>'<label><input type="radio" name="n-color" value="'+k+'"'+(i===0?' checked':'')+' aria-label="'+k+'"><span style="background:'+CARD_BG[k]+'"></span></label>').join('')+'</div></fieldset>'
    +'<p class="muted" style="margin:0;font-size:12px">Only the last 4 digits are kept, to help you tell cards apart. Never enter a full card number.</p>'
@@ -455,6 +577,17 @@ document.addEventListener('click',e=>{
     S.confirm=null;const e=S.expenses[t.dataset.id],r=e&&e.recurringId&&S.recurring[e.recurringId];
     if(r){const m=String(e.date).slice(0,7),sk=(r.skipped||[]).filter(x=>x!==m).concat([m]);patch('recurring',e.recurringId,{skipped:sk})}
     del('expenses',t.dataset.id);toast(r?'Deleted. '+(r.note||'It')+' is skipped for this month only.':'Expense deleted');return}
+  if(act==='go-acct'){S.acct=t.dataset.id;return}
+  if(act==='pick-acct'){S.acct=t.dataset.id;S.confirm=null;render();return}
+  if(act==='money-in'){openMoney('in',t.dataset.id);return}
+  if(act==='money-tr'){openMoney('transfer',t.dataset.id);return}
+  if(act==='new-acct'){openAcct(null);return}
+  if(act==='edit-acct'){openAcct(t.dataset.id);return}
+  if(act==='del-move'){S.confirm=null;del('moves',t.dataset.id);toast('Entry deleted. The balance is updated.');return}
+  if(act==='del-acct'){
+    if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to delete';return}
+    const a=S.accounts[t.dataset.id];del('accounts',t.dataset.id);closeModal();if(S.acct===t.dataset.id)S.acct=null;
+    toast((a?a.name:'Account')+' deleted. Its past expenses stay in Activity.');return}
   if(act==='add-rec'){openRec(null);return}
   if(act==='edit-rec'){openRec(t.dataset.id);return}
   if(act==='toggle-rec'){const r=S.recurring[t.dataset.id];if(!r)return;
@@ -474,26 +607,28 @@ document.addEventListener('click',e=>{
 document.addEventListener('submit',e=>{
   const f=e.target;e.preventDefault();
   if(f.id==='f-add'){
-    const amt=parseFloat($('#a-amt').value),date=$('#a-date').value,cardId=$('#a-card').value,err=$('#a-err');
+    const amt=parseFloat($('#a-amt').value),date=$('#a-date').value,payV=$('#a-pay').value,pay=readPay(payV),cardId=pay.cardId,accountId=pay.accountId,err=$('#a-err');
     if(!(amt>0)){err.textContent='Enter an amount above zero.';err.hidden=false;$('#a-amt').focus();return}
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){err.textContent='Pick a date for this expense.';err.hidden=false;return}
     const card=S.cards[cardId];
     if(card&&card.frozen){err.textContent=card.name+' is frozen. Unfreeze it or pick another card.';err.hidden=false;return}
-    const cat=$('#a-cat').value;
+    const cat=$('#a-cat').value;S.lastPay=payV||null;
     if($('#a-rep').checked){
       const rid=newId(),day=Number(date.slice(8,10)),note=$('#a-note').value.trim()||catName(cat);
-      const data={amount:Math.round(amt*100)/100,note,category:cat,cardId:cardId||'',day,startMonth:date.slice(0,7),active:true,skipped:[],createdAt:Date.now()};
+      const data={amount:Math.round(amt*100)/100,note,category:cat,cardId:cardId||'',accountId,day,startMonth:date.slice(0,7),active:true,skipped:[],createdAt:Date.now()};
       S.recurring[rid]=data;put('recurring',rid,data);closeModal();
       if(!date.startsWith(S.month))S.month=date.slice(0,7);
       toast(date<=today()?'Added '+note+'. It repeats on the '+ordinal(day)+' of every month.':note+' will be logged on '+dayLabel(date)+', then every month.');
       render();return;
     }
     const before=card?sum(expList().filter(x=>x.cardId===cardId&&String(x.date).startsWith(date.slice(0,7)))):0;
-    put('expenses',newId(),{amount:Math.round(amt*100)/100,category:cat,cardId:cardId||'',note:$('#a-note').value.trim(),date,createdAt:Date.now()});
+    const left=accountId?balance(accountId)-amt:null;
+    put('expenses',newId(),{amount:Math.round(amt*100)/100,category:cat,cardId:cardId||'',accountId,note:$('#a-note').value.trim(),date,createdAt:Date.now()});
     closeModal();
     if(!date.startsWith(S.month)){S.month=date.slice(0,7)}
     let msg='Added '+money(amt)+' to '+catName(cat);
     if(card&&Number(card.limit)>0){if(before+amt>card.limit)msg+=' · '+card.name+' is over its limit'}
+    if(left!==null)msg+=' · '+acctName(accountId)+': '+money(left)+' left';
     toast(msg);render();return;
   }
   if(f.id==='f-card'){
@@ -501,18 +636,43 @@ document.addEventListener('submit',e=>{
     if(!name){err.textContent='Give the card a name.';err.hidden=false;$('#n-name').focus();return}
     if(last4&&!/^\d{4}$/.test(last4)){err.textContent='Last 4 digits should be exactly 4 numbers.';err.hidden=false;return}
     const kind=$('#n-kind').value,id=newId(),order=cardList().reduce((m,c)=>Math.max(m,c.order||0),0)+1;
-    put('cards',id,{name,kind,last4,color:(f.querySelector('input[name="n-color"]:checked')||{}).value||'green',limit:parseFloat($('#n-limit').value)||0,frozen:false,note:'',order});
+    put('cards',id,{name,kind,last4,accountId:$('#n-acct')?$('#n-acct').value:'',color:(f.querySelector('input[name="n-color"]:checked')||{}).value||'green',limit:parseFloat($('#n-limit').value)||0,frozen:false,note:'',order});
     S.tab=kind;S.tabTouched=true;S.sel=id;closeModal();toast(name+' created');render();return;
   }
   if(f.id==='f-rec'){
     const id=f.dataset.id,amt=parseFloat($('#r-amt').value),note=$('#r-note').value.trim(),err=$('#r-err');
     if(!note){err.textContent='Give it a name, like Rent or Netflix.';err.hidden=false;$('#r-note').focus();return}
     if(!(amt>0)){err.textContent='Enter an amount above zero.';err.hidden=false;$('#r-amt').focus();return}
-    const fields={amount:Math.round(amt*100)/100,note,category:$('#r-cat').value,cardId:$('#r-card').value||'',day:Number($('#r-day').value)};
+    const fields=Object.assign({amount:Math.round(amt*100)/100,note,category:$('#r-cat').value,day:Number($('#r-day').value)},readPay($('#r-pay').value));
     if(id){patch('recurring',id,fields);closeModal();toast(note+' updated');return}
     const rid=newId(),data=Object.assign(fields,{startMonth:$('#r-start').value,active:true,skipped:[],createdAt:Date.now()});
     S.recurring[rid]=data;put('recurring',rid,data);closeModal();
     toast(note+' added. It repeats on the '+ordinal(data.day)+' of every month.');render();return;
+  }
+  if(f.id==='f-move'){
+    const tr=f.dataset.kind==='transfer',amt=parseFloat($('#m-amt').value),date=$('#m-date').value,toId=$('#m-to').value,fromId=tr?$('#m-from').value:'',err=$('#m-err');
+    if(!(amt>0)){err.textContent='Enter an amount above zero.';err.hidden=false;$('#m-amt').focus();return}
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){err.textContent='Pick a date.';err.hidden=false;return}
+    if(tr&&fromId===toId){err.textContent='Pick two different accounts.';err.hidden=false;return}
+    const v=Math.round(amt*100)/100,fromLeft=tr?balance(fromId)-v:0;
+    put('moves',newId(),{kind:tr?'transfer':'in',amount:v,toId,fromId,note:$('#m-note').value.trim(),date,createdAt:Date.now()});
+    closeModal();S.acct=tr?fromId:toId;
+    toast(tr?'Moved '+money(v)+' from '+acctName(fromId)+' to '+acctName(toId)+(fromLeft<0?' · '+acctName(fromId)+' is now below zero':''):'Added '+money(v)+' to '+acctName(toId)+' · '+money(balance(toId)+v)+' now');
+    render();return;
+  }
+  if(f.id==='f-acct'){
+    const id=f.dataset.id,name=$('#ac-name').value.trim(),type=$('#ac-type').value,raw=$('#ac-bal').value.trim(),bal=raw===''?0:parseFloat(raw),err=$('#ac-err');
+    if(!name){err.textContent='Give the account a name.';err.hidden=false;$('#ac-name').focus();return}
+    if(!isFinite(bal)){err.textContent='Enter the balance as a number.';err.hidden=false;return}
+    if(id){
+      patch('accounts',id,{name,type});
+      const diff=Math.round((bal-balance(id))*100)/100;
+      if(Math.abs(diff)>=0.01)put('moves',newId(),{kind:'adjust',amount:diff,toId:id,fromId:'',note:'Balance correction',date:today(),createdAt:Date.now()});
+      closeModal();toast(name+' saved');return;
+    }
+    const nid=newId(),order=acctList().reduce((m,a)=>Math.max(m,a.order||0),0)+1;
+    put('accounts',nid,{name,type,start:Math.round(bal*100)/100,order,createdAt:Date.now()});
+    S.acct=nid;closeModal();toast(name+' created');render();return;
   }
   if(f.id==='add-cat'){
     const name=$('#nc-name').value.trim();if(!name)return;
@@ -532,6 +692,7 @@ document.addEventListener('change',e=>{
     saveSettings({categories:next});return;
   }
   if(t.id==='cv-range'){patch('cards',S.sel,{limit:Number(t.value)});return}
+  if(t.id==='cv-acct'){const c=S.cards[S.sel];patch('cards',S.sel,{accountId:t.value});t.blur();toast(c?(t.value?c.name+' now pays from '+acctName(t.value):c.name+' is no longer linked to an account'):'Saved');return}
   if(t.id==='r-day'&&$('#r-start')){$('#r-start').innerHTML=startOptions(Number(t.value));return}
   if((t.id==='a-date'||t.id==='a-rep')&&$('#a-rep-sub')){const d=$('#a-date').value;$('#a-rep-sub').textContent=/^\d{4}-\d{2}-\d{2}$/.test(d)?'Logs it automatically on the '+ordinal(Number(d.slice(8,10)))+' of every month':'Logs it automatically on the same day each month';return}
 });
