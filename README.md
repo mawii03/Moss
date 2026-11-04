@@ -10,15 +10,15 @@ it has no build step: Firebase loads from Google's servers.
 | File | What it does |
 |---|---|
 | `index.html` | The page: sign-in screen and the app |
-| `src/style.css` | Styles, light and dark mode |
-| `src/firebase-config.js` | Your Firebase keys |
-| `src/firebase.js` | Sign in / sign up / log out, reading and saving data |
-| `src/main.js` | The app itself |
+| `style.css` | Styles, light and dark mode |
+| `firebase-config.js` | Your Firebase keys |
+| `firebase.js` | Sign in / sign up / log out, reading and saving data |
+| `main.js` | The app itself |
 | `firestore.rules` | Keeps each user's data private (works for Finlora too) |
 
 ## Put it on GitHub Pages
 
-1. Upload all files to the repo (keep the `src` folder).
+1. Upload all files to the root of the repo.
 2. **Settings → Pages → Source: Deploy from a branch**, branch `main`, folder `/ (root)`, **Save**.
 3. Open `https://<username>.github.io/<repo>/`.
 4. Firebase: **Authentication → Settings → Authorized domains** must include `<username>.github.io`.
