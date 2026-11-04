@@ -1,13 +1,13 @@
 rules_version = '2';
-service cloud_firestore {
+service cloud.firestore {
   match /databases/{database}/documents {
-    // Each person can only read and write their own budget, under users/{their uid}/...
-    match /users/{uid}/{document=**} {
+    // Each person can only read and write their own data.
+    // Covers Finlora (transactions, settings) and Moss Budget (cards, expenses, recurring, settings/moss).
+    match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
-    }
-    // Everything else is closed.
-    match /{document=**} {
-      allow read, write: if false;
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
     }
   }
 }
