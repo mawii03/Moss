@@ -92,12 +92,25 @@ function seedAccounts(){
   saveSettings({accountsSeeded:true});
 }
 function dueDate(r,m){return m+'-'+String(Math.min(r.day||1,dim(m))).padStart(2,'0')}
+const EVERY=[[1,'Every month'],[2,'Every 2 months'],[3,'Every 3 months'],[4,'Every 4 months'],[6,'Every 6 months'],[12,'Every year']];
+function every(r){const n=Number(r&&r.every)||1;return n>0?n:1}
+function monthsBetween(a,b){const [ya,ma]=a.split('-').map(Number),[yb,mb]=b.split('-').map(Number);return (yb-ya)*12+(mb-ma)}
+function onCycle(r,m){const d=monthsBetween(r.startMonth||m,m);return d>=0&&d%every(r)===0}
+function nextCycle(r,from){if(!r.startMonth)return from;if(from<=r.startMonth)return r.startMonth;const d=monthsBetween(r.startMonth,from),n=every(r);return addMonths(r.startMonth,Math.ceil(d/n)*n)}
+function nextDue(r){
+  const cm=ym(new Date());let m=nextCycle(r,cm);
+  if(S.expenses['r-'+r.id+'-'+m]||(r.skipped||[]).includes(m))m=addMonths(m,every(r));
+  return m;
+}
+function freqLabel(r){const n=every(r);return n===1?'Every month':n===12?'Every year':'Every '+n+' months'}
+function everyOptions(sel){return EVERY.map(([n,l])=>'<option value="'+n+'"'+(n===sel?' selected':'')+'>'+l+'</option>').join('')}
 function recStatus(r,m){
   const e=S.expenses['r-'+r.id+'-'+m];
   if(e)return {k:'paid',label:'Logged '+dayLabel(e.date),cls:'ok'};
   if((r.skipped||[]).includes(m))return {k:'skip',label:'Skipped',cls:''};
   if(r.active===false)return {k:'paused',label:'Paused',cls:''};
   if(m<(r.startMonth||m))return {k:'later',label:'Starts '+monthLabel(r.startMonth,true),cls:''};
+  if(!onCycle(r,m))return {k:'off',label:'Next '+monthLabel(nextCycle(r,m),true),cls:''};
   const due=dueDate(r,m),card=S.cards[r.cardId];
   if(due<=today())return card&&card.frozen?{k:'frozen',label:'Waiting · card frozen',cls:'ice'}:{k:'due',label:'Due',cls:'warn'};
   return {k:'upcoming',label:'Due '+dayLabel(due),cls:'warn'};
@@ -111,14 +124,14 @@ function runRecurring(){
     recList().forEach(r=>{
       if(r.active===false||!r.startMonth||!(Number(r.amount)>0))return;
       let m=r.startMonth,guard=0;
-      while(m<=cm&&guard++<24){
+      while(m<=cm&&guard++<60){
         const id='r-'+r.id+'-'+m,due=dueDate(r,m),card=S.cards[r.cardId];
         if(due<=td&&!S.expenses[id]&&!S.made.has(id)&&!(r.skipped||[]).includes(m)&&!(card&&card.frozen)){
           S.made.add(id);
           const acc=r.cardId&&card?(card.accountId||''):(r.accountId||'');
           put('expenses',id,{amount:Number(r.amount),category:r.category,cardId:r.cardId||'',accountId:acc,note:r.note||'',date:due,createdAt:Date.now(),recurringId:r.id,example:!!r.example});
         }
-        m=addMonths(m,1);
+        m=addMonths(m,every(r));
       }
     });
   }finally{S.running=false}
@@ -306,7 +319,7 @@ function exampleBanner(){
 function localBanner(){return ''}
 function txnRow(e,withDel){
   const card=S.cards[e.cardId];const c=catColor(e.category);
-  const sub=(e.recurringId?'Monthly · ':'')+esc(catName(e.category))+' · '+paidLabel(e)+(withDel?'':' · '+dayLabel(e.date));
+  const sub=(e.recurringId?'Recurring · ':'')+esc(catName(e.category))+' · '+paidLabel(e)+(withDel?'':' · '+dayLabel(e.date));
   let right='<span class="amt num">−'+esc(money(e.amount))+'</span>';
   if(withDel){
     right+=S.confirm==='exp:'+e.id
@@ -330,7 +343,7 @@ function vOverview(){
   html+='<div class="headrow"><div><h1>Overview</h1><p>Where your money went in '+esc(monthLabel(S.month))+'.</p></div><button class="btn primary deskonly" data-act="add"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add expense</button></div>';
   html+='<section class="hero" aria-label="Month summary"><div class="main"><span class="muted" style="font-weight:600">Spent in '+esc(mname)+'</span><span class="big num">'+esc(money(spent))+'</span>'
     +(budget>0?'<span class="muted num">of '+esc(money(budget))+' budget'+(p>100?' · <span class="pill bad">Over by '+esc(money(-left))+'</span>':'')+'</span><div class="bar"><i class="'+pctClass(p)+'" style="width:'+Math.min(100,p)+'%"></i></div>':'<span class="muted">No budget set yet. <a href="#budgets" style="color:var(--accent);font-weight:700">Set your budgets</a></span>')
-    +'</div><div class="stats"><div class="stat"><span>Left to spend</span><b class="num" style="color:'+(left<0?'var(--bad)':'var(--fg)')+'">'+esc(money(Math.max(0,left)))+'</b></div><div class="stat"><span>'+(daysLeft>0?'Per day · '+daysLeft+' days left':'Month closed')+'</span><b class="num">'+(daysLeft>0?esc(money(perDay)):'—')+'</b></div><div class="stat"><span>Monthly bills still coming</span><b class="num">'+esc(money(upSum))+'</b></div></div></section>';
+    +'</div><div class="stats"><div class="stat"><span>Left to spend</span><b class="num" style="color:'+(left<0?'var(--bad)':'var(--fg)')+'">'+esc(money(Math.max(0,left)))+'</b></div><div class="stat"><span>'+(daysLeft>0?'Per day · '+daysLeft+' days left':'Month closed')+'</span><b class="num">'+(daysLeft>0?esc(money(perDay)):'—')+'</b></div><div class="stat"><span>Bills still coming</span><b class="num">'+esc(money(upSum))+'</b></div></div></section>';
   const al=acctList();
   if(al.length){
     html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>YOUR MONEY · <span class="num" style="color:var(--fg)">'+esc(money(totalMoney()))+'</span></h2><a href="#accounts" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div><div class="moneyrow">'
@@ -416,13 +429,13 @@ function vActivity(){
 function vBudgets(){
   const ex=monthExp(),cs=cats(),total=cs.reduce((s,c)=>s+(Number(c.budget)||0),0);
   let html=localBanner()+'<div class="headrow"><div><h1>Budgets</h1><p>Set how much you plan to spend each month. Changes save when you leave a field.</p></div><span class="num" style="font-size:18px;font-weight:800">'+esc(money(total))+' / month</span></div>';
-  const rl=recList(),recTotal=rl.filter(r=>r.active!==false).reduce((s,r)=>s+(Number(r.amount)||0),0);
-  html+='<section class="panel"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px"><div><h2>MONTHLY RECURRING</h2><p class="muted" style="margin:4px 0 0;font-size:13px">Logged for you on their day every month'+(rl.length?' · <b class="num" style="color:var(--fg)">'+esc(money(recTotal))+'</b> a month':'')+'</p></div><button class="btn small primary" data-act="add-rec">'+ICON_REPEAT+'Add recurring</button></div>'
+  const rl=recList(),recTotal=rl.filter(r=>r.active!==false).reduce((s,r)=>s+(Number(r.amount)||0)/every(r),0);
+  html+='<section class="panel"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px"><div><h2>RECURRING</h2><p class="muted" style="margin:4px 0 0;font-size:13px">Logged for you on their day, every month or every few months'+(rl.length?' · about <b class="num" style="color:var(--fg)">'+esc(money(recTotal))+'</b> a month':'')+'</p></div><button class="btn small primary" data-act="add-rec">'+ICON_REPEAT+'Add recurring</button></div>'
     +(rl.length?'<div>'+rl.map(r=>{const st=recStatus(r,S.month),card=S.cards[r.cardId],paused=r.active===false;
       const actions=S.confirm==='rec:'+r.id
         ?'<button class="btn small danger solid" data-act="del-rec" data-id="'+r.id+'">Delete</button><button class="btn small" data-act="cancel">Keep</button>'
         :'<button class="btn small" data-act="toggle-rec" data-id="'+r.id+'">'+(paused?'Resume':'Pause')+'</button><button class="iconbtn" style="color:var(--muted)" data-act="edit-rec" data-id="'+r.id+'" aria-label="Edit '+esc(r.note||'recurring expense')+'">'+ICON_EDIT+'</button><button class="iconbtn" data-act="ask" data-key="rec:'+r.id+'" aria-label="Delete '+esc(r.note||'recurring expense')+'">'+ICON_TRASH+'</button>';
-      return '<div class="txn" style="flex-wrap:wrap;'+(paused?'opacity:.65':'')+'"><span class="ic" style="color:var(--accent);background:var(--accent-soft)">'+ICON_REPEAT+'</span><div class="tx" style="flex:1 1 160px"><b>'+esc(r.note||catName(r.category))+'</b><span>Every month on the '+ordinal(r.day||1)+' · '+esc(catName(r.category))+' · '+paidLabel(r)+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span><span style="display:flex;gap:6px;margin-left:auto">'+actions+'</span></div>'}).join('')+'</div>'
+      return '<div class="txn" style="flex-wrap:wrap;'+(paused?'opacity:.65':'')+'"><span class="ic" style="color:var(--accent);background:var(--accent-soft)">'+ICON_REPEAT+'</span><div class="tx" style="flex:1 1 160px"><b>'+esc(r.note||catName(r.category))+'</b><span>'+freqLabel(r)+' on the '+ordinal(r.day||1)+(every(r)>1&&r.active!==false?' · next '+esc(monthLabel(nextDue(r),true)):'')+' · '+esc(catName(r.category))+' · '+paidLabel(r)+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span><span style="display:flex;gap:6px;margin-left:auto">'+actions+'</span></div>'}).join('')+'</div>'
       +(S.confirm&&S.confirm.startsWith('rec:')?'<p class="muted" style="margin:0;font-size:13px">Deleting stops future months. Expenses already logged stay in Activity.</p>':'')
     :'<div class="empty"><b>No recurring expenses yet</b>Add rent, subscriptions or bills once and they get logged for you each month.</div>')
     +'</section>';
@@ -501,7 +514,8 @@ function openAdd(){
    +'<label class="field" for="a-date">Date<input id="a-date" class="input" type="date" value="'+(S.month===ym(new Date())?today():S.month+'-01')+'" required></label></div>'
    +'<label class="field" for="a-pay">Paid from<select id="a-pay" class="input">'+payOptions(defaultPay())+'</select></label>'
    +'<label class="field" for="a-note">Note<input id="a-note" class="input" maxlength="80" placeholder="e.g. Lunch with client"></label>'
-   +'<label for="a-rep" style="display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 12px;border-radius:12px;background:var(--sunk);font-weight:600;cursor:pointer"><input type="checkbox" id="a-rep" style="width:20px;height:20px;accent-color:var(--accent)"><span style="display:flex;flex-direction:column"><span>Repeat every month</span><span class="muted" id="a-rep-sub" style="font-size:12px;font-weight:500">Logs it automatically on the same day each month</span></span></label>'
+   +'<label for="a-rep" style="display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 12px;border-radius:12px;background:var(--sunk);font-weight:600;cursor:pointer"><input type="checkbox" id="a-rep" style="width:20px;height:20px;accent-color:var(--accent)"><span style="display:flex;flex-direction:column"><span>Repeat this expense</span><span class="muted" id="a-rep-sub" style="font-size:12px;font-weight:500">Logs it automatically on the same day</span></span></label>'
+   +'<label class="field" for="a-every" id="a-every-wrap" hidden>How often<select id="a-every" class="input">'+everyOptions(1)+'</select></label>'
    +'<p class="err" id="a-err" hidden></p><div class="actions"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">Add expense</button></div></form>','#a-amt');
 }
 function acctOptions(sel,skip){return acctList().filter(a=>a.id!==skip).map(a=>'<option value="'+esc(a.id)+'"'+(a.id===sel?' selected':'')+'>'+esc(a.name)+' · '+esc(money(balance(a.id)))+'</option>').join('')}
@@ -530,19 +544,24 @@ function openAcct(id){
    +'<p class="err" id="ac-err" hidden></p><div class="actions">'+(a?'<button type="button" class="btn danger" data-act="del-acct" data-id="'+esc(id)+'" style="margin-right:auto">'+ICON_TRASH+'Delete</button>':'')+'<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(a?'Save':'Create account')+'</button></div></form>','#ac-name');
 }
 function startOptions(day){
-  const cm=ym(new Date()),nm=addMonths(cm,1),r={day};
-  const passed=dueDate(r,cm)<=today();
-  return '<option value="'+cm+'">This month · '+esc(dayLabel(dueDate(r,cm)))+(passed?' (logs it now)':'')+'</option><option value="'+nm+'"'+(passed?' selected':'')+'>Next month · '+esc(dayLabel(dueDate(r,nm)))+'</option>';
+  return monthOptions(day,null);
+}
+function monthOptions(day,sel){
+  const cm=ym(new Date()),r={day},passed=dueDate(r,cm)<=today();
+  if(!sel)sel=passed?addMonths(cm,1):cm;
+  return Array.from({length:13},(_,i)=>addMonths(cm,i)).map((m,i)=>'<option value="'+m+'"'+(m===sel?' selected':'')+'>'+(i===0?'This month':i===1?'Next month':monthLabel(m,true))+' · '+esc(dayLabel(dueDate(r,m)))+(i===0&&passed?' (logs it now)':'')+'</option>').join('');
 }
 function openRec(id){
-  const r=id?S.recurring[id]:null,cl=cardList(),day=r?r.day:new Date().getDate();
+  const r=id&&S.recurring[id]?Object.assign({id},S.recurring[id]):null,cl=cardList(),day=r?r.day:new Date().getDate();
   openModal('<h2>'+(r?'Edit recurring':'New recurring expense')+'</h2><form id="f-rec" data-id="'+(id||'')+'" novalidate>'
    +'<label class="field" for="r-note">Name<input id="r-note" class="input" maxlength="60" placeholder="e.g. Rent, Netflix, Phone bill" value="'+esc(r?r.note:'')+'" required></label>'
-   +'<label class="field" for="r-amt">Amount each month ('+esc(cur())+')<input id="r-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="'+(r?esc(r.amount):'')+'" required></label>'
+   +'<label class="field" for="r-amt">Amount each time ('+esc(cur())+')<input id="r-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="'+(r?esc(r.amount):'')+'" required></label>'
    +'<div class="two"><label class="field" for="r-cat">Category<select id="r-cat" class="input">'+cats().map(c=>'<option value="'+esc(c.id)+'"'+(r&&r.category===c.id?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select></label>'
    +'<label class="field" for="r-day">Day of the month<select id="r-day" class="input">'+Array.from({length:31},(_,i)=>i+1).map(d=>'<option value="'+d+'"'+(d===day?' selected':'')+'>'+ordinal(d)+'</option>').join('')+'</select></label></div>'
    +'<label class="field" for="r-pay">Paid from<select id="r-pay" class="input">'+payOptions(r?payValue(r):defaultPay())+'</select></label>'
-   +(r?'<p class="muted" style="margin:0;font-size:12px">Changes apply from the next time it\'s logged. Past months stay as they are.</p>':'<label class="field" for="r-start">First time<select id="r-start" class="input">'+startOptions(day)+'</select></label><p class="muted" style="margin:0;font-size:12px">Days past the end of a short month land on its last day. A frozen card waits until you unfreeze it.</p>')
+   +'<div class="two"><label class="field" for="r-every">How often<select id="r-every" class="input">'+everyOptions(r?every(r):1)+'</select></label>'
+   +'<label class="field" for="r-start">'+(r?'Next payment':'First payment')+'<select id="r-start" class="input">'+monthOptions(day,r?nextDue(r):null)+'</select></label></div>'
+   +'<p class="muted" style="margin:0;font-size:12px">'+(r?'Changes apply from the next payment. Past ones stay as they are. ':'')+'Days past the end of a short month land on its last day. A frozen card waits until you unfreeze it.</p>'
    +'<p class="err" id="r-err" hidden></p><div class="actions"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(r?'Save changes':'Add recurring')+'</button></div></form>','#r-note');
 }
 function openNewCard(){
@@ -591,7 +610,7 @@ document.addEventListener('click',e=>{
   if(act==='add-rec'){openRec(null);return}
   if(act==='edit-rec'){openRec(t.dataset.id);return}
   if(act==='toggle-rec'){const r=S.recurring[t.dataset.id];if(!r)return;
-    if(r.active===false){const cm=ym(new Date());patch('recurring',t.dataset.id,{active:true,startMonth:(r.startMonth&&r.startMonth>cm)?r.startMonth:cm});toast((r.note||'Recurring expense')+' resumed')}
+    if(r.active===false){const cm=ym(new Date());patch('recurring',t.dataset.id,{active:true,startMonth:nextCycle(r,cm)});toast((r.note||'Recurring expense')+' resumed')}
     else{patch('recurring',t.dataset.id,{active:false});toast((r.note||'Recurring expense')+' paused')}
     return}
   if(act==='del-rec'){S.confirm=null;const r=S.recurring[t.dataset.id];del('recurring',t.dataset.id);toast((r&&r.note||'Recurring expense')+' deleted. Past expenses stay.');return}
@@ -615,10 +634,12 @@ document.addEventListener('submit',e=>{
     const cat=$('#a-cat').value;S.lastPay=payV||null;
     if($('#a-rep').checked){
       const rid=newId(),day=Number(date.slice(8,10)),note=$('#a-note').value.trim()||catName(cat);
-      const data={amount:Math.round(amt*100)/100,note,category:cat,cardId:cardId||'',accountId,day,startMonth:date.slice(0,7),active:true,skipped:[],createdAt:Date.now()};
+      const ev=Number($('#a-every').value)||1;
+      const data={amount:Math.round(amt*100)/100,note,category:cat,cardId:cardId||'',accountId,day,every:ev,startMonth:date.slice(0,7),active:true,skipped:[],createdAt:Date.now()};
       S.recurring[rid]=data;put('recurring',rid,data);closeModal();
       if(!date.startsWith(S.month))S.month=date.slice(0,7);
-      toast(date<=today()?'Added '+note+'. It repeats on the '+ordinal(day)+' of every month.':note+' will be logged on '+dayLabel(date)+', then every month.');
+      const fl=freqLabel(data).toLowerCase();
+      toast(date<=today()?'Added '+note+'. It repeats '+fl+' on the '+ordinal(day)+'.':note+' will be logged on '+dayLabel(date)+', then '+fl+'.');
       render();return;
     }
     const before=card?sum(expList().filter(x=>x.cardId===cardId&&String(x.date).startsWith(date.slice(0,7)))):0;
@@ -643,11 +664,11 @@ document.addEventListener('submit',e=>{
     const id=f.dataset.id,amt=parseFloat($('#r-amt').value),note=$('#r-note').value.trim(),err=$('#r-err');
     if(!note){err.textContent='Give it a name, like Rent or Netflix.';err.hidden=false;$('#r-note').focus();return}
     if(!(amt>0)){err.textContent='Enter an amount above zero.';err.hidden=false;$('#r-amt').focus();return}
-    const fields=Object.assign({amount:Math.round(amt*100)/100,note,category:$('#r-cat').value,day:Number($('#r-day').value)},readPay($('#r-pay').value));
-    if(id){patch('recurring',id,fields);closeModal();toast(note+' updated');return}
-    const rid=newId(),data=Object.assign(fields,{startMonth:$('#r-start').value,active:true,skipped:[],createdAt:Date.now()});
+    const fields=Object.assign({amount:Math.round(amt*100)/100,note,category:$('#r-cat').value,day:Number($('#r-day').value),every:Number($('#r-every').value)||1,startMonth:$('#r-start').value},readPay($('#r-pay').value));
+    if(id){patch('recurring',id,fields);closeModal();toast(note+' updated · '+freqLabel(fields).toLowerCase()+', next '+monthLabel(fields.startMonth,true));return}
+    const rid=newId(),data=Object.assign(fields,{active:true,skipped:[],createdAt:Date.now()});
     S.recurring[rid]=data;put('recurring',rid,data);closeModal();
-    toast(note+' added. It repeats on the '+ordinal(data.day)+' of every month.');render();return;
+    toast(note+' added. It repeats '+freqLabel(data).toLowerCase()+' on the '+ordinal(data.day)+'.');render();return;
   }
   if(f.id==='f-move'){
     const tr=f.dataset.kind==='transfer',amt=parseFloat($('#m-amt').value),date=$('#m-date').value,toId=$('#m-to').value,fromId=tr?$('#m-from').value:'',err=$('#m-err');
@@ -693,8 +714,9 @@ document.addEventListener('change',e=>{
   }
   if(t.id==='cv-range'){patch('cards',S.sel,{limit:Number(t.value)});return}
   if(t.id==='cv-acct'){const c=S.cards[S.sel];patch('cards',S.sel,{accountId:t.value});t.blur();toast(c?(t.value?c.name+' now pays from '+acctName(t.value):c.name+' is no longer linked to an account'):'Saved');return}
-  if(t.id==='r-day'&&$('#r-start')){$('#r-start').innerHTML=startOptions(Number(t.value));return}
-  if((t.id==='a-date'||t.id==='a-rep')&&$('#a-rep-sub')){const d=$('#a-date').value;$('#a-rep-sub').textContent=/^\d{4}-\d{2}-\d{2}$/.test(d)?'Logs it automatically on the '+ordinal(Number(d.slice(8,10)))+' of every month':'Logs it automatically on the same day each month';return}
+  if(t.id==='r-day'&&$('#r-start')){$('#r-start').innerHTML=monthOptions(Number(t.value),$('#r-start').value);return}
+  if(t.id==='a-rep'){$('#a-every-wrap').hidden=!t.checked}
+  if((t.id==='a-date'||t.id==='a-rep')&&$('#a-rep-sub')){const d=$('#a-date').value;$('#a-rep-sub').textContent=/^\d{4}-\d{2}-\d{2}$/.test(d)?'Logs it automatically on the '+ordinal(Number(d.slice(8,10)))+' of the month':'Logs it automatically on the same day';return}
 });
 document.addEventListener('input',e=>{
   const t=e.target;
