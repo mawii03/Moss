@@ -138,7 +138,11 @@ function runRecurring(){
 }
 
 /* ---------- store ---------- */
-function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>{t.hidden=true},3200)}
+function toast(msg){
+  const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);clearTimeout(toast.h);
+  requestAnimationFrame(()=>t.classList.add('show'));
+  toast.t=setTimeout(()=>{t.classList.remove('show');toast.h=setTimeout(()=>{t.hidden=true},260)},3200);
+}
 function errMsg(e){
   if(e&&e.code==='permission-denied')return "You don't have permission to save that. Try logging out and back in.";
   if(e&&e.code==='resource-exhausted')return 'Too many changes at once. Wait a moment and try again.';
@@ -185,16 +189,36 @@ function render(){
   const view=$('#view'),a=document.activeElement;
   if(a&&view.contains(a)&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)){S.pending=true;return}
   S.pending=false;
+  const ready=!!(S.loaded.exp&&S.loaded.cards&&S.loaded.rec&&S.loaded.accts&&S.loaded.set);
+  const key=S.view+'|'+S.month+'|'+ready,enter=key!==S.lastKey;S.lastKey=key;
+  view.classList.remove('enter');
   document.querySelectorAll('[data-nav]').forEach(el=>{if(el.dataset.nav===S.view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')});
   document.querySelectorAll('.m-label').forEach(el=>el.textContent=monthLabel(S.month,el.closest('.mtop')));
   const ex=monthExp();$('#m-total').textContent=money(sum(ex))+' this month';
   const h=new Date().getHours();$('#greet').textContent=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
   $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',accounts:'My money',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
   $('#tip').hidden=true;
-  if(S.view==='cards'){renderCards();return}
+  if(S.view==='cards'){renderCards();afterRender(enter);return}
   view.dataset.view=S.view;
-  if(S.view==='stats'){view.innerHTML=vStats();fillStats();return}
+  if(S.view==='stats'){view.innerHTML=vStats();fillStats();afterRender(enter);return}
   view.innerHTML=S.view==='accounts'?vAccounts():S.view==='budgets'?vBudgets():S.view==='activity'?vActivity():vOverview();
+  afterRender(enter);
+}
+
+const RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function afterRender(enter){
+  const view=$('#view');
+  if(!enter||RM)return;
+  void view.offsetWidth;view.classList.add('enter');
+  clearTimeout(afterRender.t);afterRender.t=setTimeout(()=>view.classList.remove('enter'),1200);
+  // count big money figures up from zero
+  view.querySelectorAll('.big, .acct .bal, .mchip b, .kpi b').forEach(el=>{
+    const txt=el.textContent.trim(),v=parseFloat(txt.replace(/[^0-9.\-]/g,''));
+    if(!isFinite(v)||money(v)!==txt.replace(/^\+/,''))return;
+    const plus=txt.startsWith('+')?'+':'',t0=performance.now(),dur=900;
+    const step=now=>{const k=Math.min(1,(now-t0)/dur),e=1-Math.pow(1-k,3);el.textContent=plus+money(Math.round(v*e*100)/100);if(k<1&&el.isConnected)requestAnimationFrame(step)};
+    el.textContent=plus+money(0);requestAnimationFrame(step);
+  });
 }
 
 /* ---------- statistics ---------- */
@@ -422,7 +446,7 @@ function vActivity(){
     +'<label class="field" for="f-card">Card<select id="f-card" class="input"><option value="all">All cards</option>'+cardList().map(c=>'<option value="'+esc(c.id)+'"'+(S.fCard===c.id?' selected':'')+'>'+esc(c.name)+' ··'+esc(c.last4||'')+'</option>').join('')+'<option value="cash"'+(S.fCard==='cash'?' selected':'')+'>Cash / other</option></select></label></div>';
   if(!ex.length)return html+'<div class="empty"><b>Nothing here yet</b>Expenses you add for '+esc(monthLabel(S.month))+' will show up here.</div>';
   const days={};ex.forEach(e=>{(days[e.date]=days[e.date]||[]).push(e)});
-  html+='<div>'+Object.keys(days).sort().reverse().map(d=>'<div class="daylbl"><span>'+esc(dayLabel(d))+'</span><span class="num">'+esc(money(sum(days[d])))+'</span></div>'+days[d].map(e=>txnRow(e,true)).join('')).join('')+'</div>';
+  html+='<section class="panel daylist">'+Object.keys(days).sort().reverse().map(d=>'<div class="daylbl"><span>'+esc(dayLabel(d))+'</span><span class="num">'+esc(money(sum(days[d])))+'</span></div>'+days[d].map(e=>txnRow(e,true)).join('')).join('')+'</section>';
   return html;
 }
 
@@ -505,8 +529,12 @@ function renderCards(){
 }
 
 /* ---------- modals ---------- */
-function openModal(html,focusSel){$('#modal').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">'+html+'</div></div>';setTimeout(()=>{const f=$(focusSel||'#modal input');if(f)f.focus()},30)}
-function closeModal(){$('#modal').innerHTML='';if(S.pending)render()}
+function openModal(html,focusSel){clearTimeout(closeModal.t);$('#modal').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">'+html+'</div></div>';setTimeout(()=>{const f=$(focusSel||'#modal input');if(f)f.focus()},30)}
+function closeModal(){
+  const m=$('#modal'),sc=m.querySelector('.scrim');
+  if(sc&&!RM&&!sc.classList.contains('closing')){sc.classList.add('closing');clearTimeout(closeModal.t);closeModal.t=setTimeout(()=>{if(m.querySelector('.scrim.closing'))m.innerHTML='';if(S.pending)render()},190);return}
+  if(!sc||RM)m.innerHTML='';if(S.pending)render();
+}
 function openAdd(){
   openModal('<h2>Add expense</h2><form id="f-add" novalidate>'
    +'<label class="field" for="a-amt">Amount ('+esc(cur())+')<input id="a-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" required></label>'
