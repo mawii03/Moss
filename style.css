@@ -519,3 +519,14 @@ button.userbox .dot{margin-left:2px}
 .prof-btns label.btn{cursor:pointer}
 .prof-ro{display:flex;align-items:center;background:var(--sunk);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:760px){.mtop .logout-btn{display:none}.mtop .brand span{white-space:nowrap}.mtop .month span{min-width:64px}}
+
+/* clickable greeting */
+.greet-btn{display:inline-flex;align-items:center;gap:8px;border:0;background:transparent;padding:4px 8px;margin:-4px -8px;border-radius:10px;cursor:pointer;color:inherit;font:inherit;text-align:left;transition:background .2s var(--ease)}
+.greet-btn:hover{background:var(--surface);box-shadow:var(--sh-1)}
+.greet-edit{color:var(--muted);opacity:0;transition:opacity .2s}
+.greet-btn:hover .greet-edit,.greet-btn:focus-visible .greet-edit{opacity:1}
+@media (hover:none){.greet-edit{opacity:.6}}
+.userbox .ub-text{justify-content:center}
+.userbox .avatar{display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--accent)}
+.hello{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.hello .greet-btn{margin-bottom:0}

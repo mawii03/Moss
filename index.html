@@ -7,7 +7,7 @@
 <title>Finlora</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./style.css?v=20261106b">
 </head>
 <body>
 
@@ -79,7 +79,7 @@
       <span class="avatar" id="u-avatar" aria-hidden="true">?</span>
       <span class="ub-text">
         <b id="u-name">Signed in</b>
-        <span id="sync-txt">Connecting…</span>
+        <span id="sync-txt" hidden></span>
       </span>
       <span class="dot" id="sync-dot" style="background:var(--track)"></span>
       <svg class="ub-edit" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
@@ -89,7 +89,7 @@
 
   <main>
     <div class="topbar">
-      <div class="hello"><b id="greet">Hello</b><span id="today-lbl"></span></div>
+      <div class="hello"><button type="button" class="greet-btn" data-act="profile" title="Edit your name and photo"><b id="greet">Hello</b><svg class="greet-edit" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button><span id="today-lbl"></span></div>
       <div class="month deskonly" aria-label="Month"><button data-act="prev" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><span class="m-label"></span><button data-act="next" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></div>
     </div>
     <div id="view"></div>
@@ -108,6 +108,6 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <div id="tip" class="tip" hidden></div>
 
-<script type="module" src="./main.js"></script>
+<script type="module" src="./main.js?v=20261106b"></script>
 </body>
 </html>

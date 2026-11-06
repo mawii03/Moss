@@ -8,7 +8,7 @@ import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc,
 } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js';
-import { firebaseConfig } from './firebase-config.js';
+import { firebaseConfig } from './firebase-config.js?v=20261106b';
 
 export const configured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 

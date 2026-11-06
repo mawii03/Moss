@@ -1,4 +1,4 @@
-import {configured,watchUser,logIn,signUp,logInWithGoogle,resetPassword,logOut,userStore,saveDisplayName} from './firebase.js';
+import {configured,watchUser,logIn,signUp,logInWithGoogle,resetPassword,logOut,userStore,saveDisplayName} from './firebase.js?v=20261106b';
 
 const $=(s,el)=>(el||document).querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -157,9 +157,10 @@ function saveSettings(partial){
 }
 function setSync(state){
   const d=$('#sync-dot'),t=$('#sync-txt');
-  if(state==='live'){d.style.background='var(--accent)';t.textContent='Saved to your account'}
-  else if(state==='offline'){d.style.background='var(--warn)';t.textContent='Offline · will sync later'}
-  else{d.style.background='var(--track)';t.textContent='Connecting…'}
+  // The status line only shows when something needs your attention.
+  if(state==='live'){d.style.background='var(--accent)';d.title='Saved';t.textContent='';t.hidden=true}
+  else if(state==='offline'){d.style.background='var(--warn)';d.title='Offline';t.textContent='Offline · will sync later';t.hidden=false}
+  else{d.style.background='var(--track)';d.title='Connecting';t.textContent='';t.hidden=true}
 }
 let unsubs=[];
 function disconnect(){
