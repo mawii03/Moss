@@ -485,3 +485,17 @@ main{background:transparent;padding:8px 6px 40px;gap:24px}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none !important;transition:none !important}
 }
+
+/* account page */
+a.acct{text-decoration:none;color:var(--fg)}
+.acct .go{margin-left:auto;font-size:22px;line-height:1;color:var(--muted);transition:transform .25s var(--ease),color .2s}
+.acct:hover .go{transform:translateX(3px);color:var(--accent)}
+.back{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;min-height:36px;padding:0 12px 0 8px;border-radius:10px;color:var(--muted);text-decoration:none;font-weight:700;font-size:13px;transition:background .2s,color .2s,transform .2s var(--ease)}
+.back:hover{background:var(--surface);color:var(--fg);transform:translateX(-2px)}
+.acct-hero .main{gap:6px}
+.acct-id{display:flex;align-items:center;gap:12px}
+.acct-id b{display:block;font-size:18px;font-weight:800;letter-spacing:-.02em}
+.acct-id span span{font-size:12px;color:var(--muted)}
+.ai.glass{width:44px;height:44px;border-radius:13px;background:rgba(255,255,255,.14) !important;color:#fff !important;border:1px solid rgba(255,255,255,.2)}
+.actbar{display:flex;flex-wrap:wrap;gap:10px}
+@media (max-width:760px){.actbar .btn{flex:1 1 calc(50% - 5px)}}

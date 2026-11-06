@@ -190,17 +190,18 @@ function render(){
   if(a&&view.contains(a)&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)){S.pending=true;return}
   S.pending=false;
   const ready=!!(S.loaded.exp&&S.loaded.cards&&S.loaded.rec&&S.loaded.accts&&S.loaded.set);
-  const key=S.view+'|'+S.month+'|'+ready,enter=key!==S.lastKey;S.lastKey=key;
+  const key=S.view+'|'+(S.view==='account'?S.pid:'')+'|'+S.month+'|'+ready,enter=key!==S.lastKey;S.lastKey=key;
   view.classList.remove('enter');
-  document.querySelectorAll('[data-nav]').forEach(el=>{if(el.dataset.nav===S.view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')});
+  document.querySelectorAll('[data-nav]').forEach(el=>{if(el.dataset.nav===(S.view==='account'?'accounts':S.view))el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')});
   document.querySelectorAll('.m-label').forEach(el=>el.textContent=monthLabel(S.month,el.closest('.mtop')));
   const ex=monthExp();$('#m-total').textContent=money(sum(ex))+' this month';
   const h=new Date().getHours();$('#greet').textContent=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
-  $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',accounts:'My money',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
+  $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',account:(S.accounts[S.pid]||{}).name||'Account',accounts:'My money',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
   $('#tip').hidden=true;
   if(S.view==='cards'){renderCards();afterRender(enter);return}
   view.dataset.view=S.view;
   if(S.view==='stats'){view.innerHTML=vStats();fillStats();afterRender(enter);return}
+  if(S.view==='account'){view.innerHTML=vAccount();const c=$('#ch-bal');if(c)c.innerHTML=drawBal(c.clientWidth);afterRender(enter);return}
   view.innerHTML=S.view==='accounts'?vAccounts():S.view==='budgets'?vBudgets():S.view==='activity'?vActivity():vOverview();
   afterRender(enter);
 }
@@ -371,7 +372,7 @@ function vOverview(){
   const al=acctList();
   if(al.length){
     html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>YOUR MONEY · <span class="num" style="color:var(--fg)">'+esc(money(totalMoney()))+'</span></h2><a href="#accounts" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div><div class="moneyrow">'
-      +al.map(a=>{const b=balance(a.id);return '<a class="mchip" href="#accounts" data-act="go-acct" data-id="'+esc(a.id)+'">'+acctIcon(a.type)+'<span class="t"><span>'+esc(a.name)+'</span><b class="num'+(b<0?' neg':'')+'">'+esc(money(b))+'</b></span></a>'}).join('')+'</div></section>';
+      +al.map(a=>{const b=balance(a.id);return '<a class="mchip" href="#acct-'+esc(a.id)+'">'+acctIcon(a.type)+'<span class="t"><span>'+esc(a.name)+'</span><b class="num'+(b<0?' neg':'')+'">'+esc(money(b))+'</b></span></a>'}).join('')+'</div></section>';
   }
   if(upcoming.length){
     html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>COMING UP IN '+esc(mname.toUpperCase())+'</h2><a href="#budgets" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div><div>'
@@ -425,17 +426,71 @@ function vAccounts(){
   html+='<section class="hero" aria-label="Total money"><div class="main"><span class="muted" style="font-weight:600">Total money left</span><span class="big num'+(tot<0?' neg':'')+'">'+esc(money(tot))+'</span><span class="muted">Across '+al.length+' account'+(al.length>1?'s':'')+'</span></div>'
     +'<div class="stats"><div class="stat"><span>Came in · '+esc(mname)+'</span><b class="num" style="color:var(--accent)">+'+esc(money(tin))+'</b></div><div class="stat"><span>Went out · '+esc(mname)+'</span><b class="num">−'+esc(money(tout))+'</b></div></div></section>';
   html+='<div class="acctgrid">'+al.map(a=>{const b=balance(a.id),f=acctFlow(a.id,m);
-    return '<button class="acct" data-act="pick-acct" data-id="'+esc(a.id)+'" aria-pressed="'+(S.acct===a.id)+'"><span class="top">'+acctIcon(a.type)+'<span class="nm">'+esc(a.name)+'</span>'+(b<0?'<span class="pill bad">Below zero</span>':'')+'</span><span class="bal num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span><small class="num">+'+esc(money(f.inn))+' in · −'+esc(money(f.out))+' out in '+esc(mname)+'</small></button>'}).join('')
+    return '<a class="acct" href="#acct-'+esc(a.id)+'"><span class="top">'+acctIcon(a.type)+'<span class="nm">'+esc(a.name)+'</span>'+(b<0?'<span class="pill bad">Below zero</span>':'<span class="go" aria-hidden="true">›</span>')+'</span><span class="bal num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span><small class="num">+'+esc(money(f.inn))+' in · −'+esc(money(f.out))+' out in '+esc(mname)+'</small></a>'}).join('')
     +'<button class="acct new" data-act="new-acct">+ New account</button></div>';
-  const a=S.accounts[S.acct];
-  if(a){
-    const rows=acctHistory(S.acct,m);
-    html+='<section class="panel"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px"><div style="display:flex;align-items:center;gap:10px">'+acctIcon(a.type)+'<div><h2>'+esc(a.name.toUpperCase())+' · '+esc(mname.toUpperCase())+'</h2><b class="num" style="font-size:18px">'+esc(money(balance(S.acct)))+' left</b></div></div>'
-      +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn small primary" data-act="money-in" data-id="'+esc(S.acct)+'">+ Add money</button><button class="btn small" data-act="money-tr" data-id="'+esc(S.acct)+'">Transfer</button><button class="btn small" data-act="edit-acct" data-id="'+esc(S.acct)+'">'+ICON_EDIT+'Edit</button></div></div>'
-      +(rows.length?'<div>'+rows.map(moneyRow).join('')+'</div>':'<div class="empty"><b>Nothing in '+esc(mname)+' yet</b>Money you add, transfers and expenses paid from '+esc(a.name)+' show up here.</div>')
-      +'<p class="muted" style="margin:0;font-size:12px">Delete expenses from Activity. Deleting an entry here puts its amount back.</p></section>';
-  }
   return html;
+}
+function balanceOn(id,d){
+  const a=S.accounts[id];if(!a)return 0;let b=Number(a.start)||0;
+  moveList().forEach(m=>{if(String(m.date||'')>d)return;const v=Number(m.amount)||0;if(m.kind==='transfer'){if(m.toId===id)b+=v;if(m.fromId===id)b-=v}else if(m.toId===id)b+=v});
+  expList().forEach(e=>{if(e.accountId===id&&String(e.date||'')<=d)b-=Number(e.amount)||0});
+  return b;
+}
+function acctBills(id){return recList().filter(r=>{const c=S.cards[r.cardId];return r.cardId&&c?c.accountId===id:r.accountId===id})}
+function vAccount(){
+  const id=S.pid,a=S.accounts[id],m=S.month,mname=monthLabel(m).split(' ')[0];
+  const back='<a class="back" href="#accounts"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>My money</a>';
+  if(!a)return back+'<div class="empty"><b>'+(S.loaded.accts?'This account doesn\'t exist anymore':'Loading…')+'</b>'+(S.loaded.accts?'It may have been deleted. Go back to My money to see your accounts.':'')+'</div>';
+  const T=ACCT_TYPES[a.type]||ACCT_TYPES.other,b=balance(id),f=acctFlow(id,m),net=f.inn-f.out;
+  let html=back;
+  html+='<section class="hero acct-hero" aria-label="'+esc(a.name)+' balance"><div class="main"><span class="acct-id">'+acctIcon(a.type,'ai glass')+'<span><b>'+esc(a.name)+'</b><span>'+(a.name.trim().toLowerCase()===T.label.toLowerCase()?'Account':esc(T.label)+' account')+'</span></span></span><span class="muted" style="font-weight:600;margin-top:6px">Money left</span><span class="big num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span></div>'
+    +'<div class="stats"><div class="stat"><span>Came in · '+esc(mname)+'</span><b class="num" style="color:var(--accent)">+'+esc(money(f.inn))+'</b></div><div class="stat"><span>Went out · '+esc(mname)+'</span><b class="num">−'+esc(money(f.out))+'</b></div><div class="stat"><span>Net · '+esc(mname)+'</span><b class="num" style="color:'+(net<0?'var(--bad)':'var(--accent)')+'">'+(net<0?'−':'+')+esc(money(Math.abs(net)))+'</b></div></div></section>';
+  html+='<div class="actbar"><button class="btn primary" data-act="money-in" data-id="'+esc(id)+'">+ Add money</button><button class="btn" data-act="money-tr" data-id="'+esc(id)+'">'+ICON_REPEAT+'Transfer</button><button class="btn" data-act="add" data-pay="a:'+esc(id)+'"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>Add expense</button><button class="btn" data-act="edit-acct" data-id="'+esc(id)+'">'+ICON_EDIT+'Edit</button></div>';
+  // balance chart + where it went
+  const ex=expList().filter(e=>e.accountId===id&&String(e.date||'').startsWith(m)),spent=sum(ex);
+  const byCat=cats().map(c=>({c,s:sum(ex.filter(e=>e.category===c.id))})).filter(x=>x.s>0).sort((x,y)=>y.s-x.s);
+  const other=sum(ex.filter(e=>!catOf(e.category)));if(other>0)byCat.push({c:{id:'',name:'Uncategorized'},s:other});
+  html+='<div class="grid2"><section class="panel"><h2>BALANCE IN '+esc(mname.toUpperCase())+'</h2><div class="chart" id="ch-bal" role="img" aria-label="'+esc(a.name)+' balance day by day"></div></section>'
+    +'<section class="panel"><h2>WHERE IT WENT</h2>'+(byCat.length?'<div>'+byCat.map(({c,s})=>'<div class="catrow"><span class="nm"><span class="dot" style="background:'+catColor(c.id)+'"></span><span>'+esc(c.name)+'</span></span><span class="num muted"><b style="color:var(--fg)">'+esc(money(s))+'</b> · '+Math.round(s/spent*100)+'%</span><div class="bar"><i style="width:'+(s/spent*100)+'%;background:'+catColor(c.id)+'"></i></div></div>').join('')+'</div>':'<div class="empty"><b>No expenses from '+esc(a.name)+' in '+esc(mname)+'</b>Expenses paid from it show up here.</div>')+'</section></div>';
+  // linked cards + bills
+  const cards=cardList().filter(c=>c.accountId===id),bills=acctBills(id);
+  html+='<div class="grid2"><section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>CARDS THAT PAY FROM '+esc(a.name.toUpperCase())+'</h2><a href="#cards" style="color:var(--accent);font-weight:700;font-size:13px">Cards</a></div>'
+    +(cards.length?'<div>'+cards.map(c=>{const cs=sum(expList().filter(e=>e.cardId===c.id&&String(e.date||'').startsWith(m)));return '<div class="txn"><span class="mini" style="background:'+(CARD_BG[c.color]||CARD_BG.green)+'"></span><div class="tx"><b>'+esc(c.name)+'</b><span>'+esc(c.kind)+' ··'+esc(c.last4||'')+(c.frozen?' · Frozen':'')+'</span></div><span class="num muted"><b style="color:var(--fg)">'+esc(money(cs))+'</b> in '+esc(mname)+'</span></div>'}).join('')+'</div>'
+      :'<div class="empty"><b>No cards linked</b>On the Cards page, set a card to pay from '+esc(a.name)+'.</div>')+'</section>'
+    +'<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>BILLS FROM '+esc(a.name.toUpperCase())+'</h2><a href="#budgets" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div>'
+    +(bills.length?'<div>'+bills.map(r=>{const st=recStatus(r,m);return '<div class="txn"><span class="ic" style="color:var(--accent);background:var(--accent-soft)">'+ICON_REPEAT+'</span><div class="tx"><b>'+esc(r.note||catName(r.category))+'</b><span>'+freqLabel(r)+' on the '+ordinal(r.day||1)+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span></div>'}).join('')+'</div>'
+      :'<div class="empty"><b>No recurring bills</b>Bills set to be paid from '+esc(a.name)+' show up here.</div>')+'</section></div>';
+  // history grouped by day
+  const rows=acctHistory(id,m),days={};rows.forEach(r=>{(days[r.date]=days[r.date]||[]).push(r)});
+  html+='<section class="panel daylist"><h2 style="margin-bottom:4px">HISTORY · '+esc(mname.toUpperCase())+'</h2>'
+    +(rows.length?Object.keys(days).sort().reverse().map(d=>{const net=days[d].reduce((t,r)=>t+r.amt,0);return '<div class="daylbl"><span>'+esc(dayLabel(d))+'</span><span class="num">'+(net<0?'−':'+')+esc(money(Math.abs(net)))+'</span></div>'+days[d].map(moneyRow).join('')}).join('')
+      :'<div class="empty"><b>Nothing in '+esc(mname)+' yet</b>Money you add, transfers and expenses paid from '+esc(a.name)+' show up here.</div>')
+    +(rows.length?'<p class="muted" style="margin:10px 0 0;font-size:12px">Delete expenses from Activity. Deleting an added amount or transfer here puts it back.</p>':'')+'</section>';
+  return html;
+}
+function drawBal(W){
+  const id=S.pid,m=S.month,D=dim(m),el=daysElapsed(m);
+  if(!S.accounts[id])return '';
+  if(!el)return '<div class="empty"><b>'+esc(monthLabel(m))+' hasn\'t started yet</b></div>';
+  W=Math.max(260,W);const H=200,padL=60,padR=14,top=14,bot=28,iw=W-padL-padR,ih=H-top-bot;
+  const vals=Array.from({length:el},(_,i)=>balanceOn(id,m+'-'+String(i+1).padStart(2,'0')));
+  let lo=Math.min(0,...vals),hi=Math.max(...vals);if(hi===lo)hi=lo+1000;
+  const pad=(hi-lo)*.12;hi=niceMax(hi+pad);if(lo<0)lo=-niceMax(-lo+pad);
+  const X=i=>padL+(D>1?i/(D-1):0)*iw,Y=v=>top+ih-(v-lo)/(hi-lo)*ih;
+  let s='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">';
+  [lo,(lo+hi)/2,hi].forEach(v=>{const y=Y(v);s+='<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+y+'" y2="'+y+'" stroke="var(--grid)"/><text x="'+(padL-8)+'" y="'+(y+4)+'" text-anchor="end">'+esc(short(v))+'</text>'});
+  if(lo<0)s+='<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+Y(0)+'" y2="'+Y(0)+'" stroke="var(--muted)" stroke-dasharray="3 3"/>';
+  [1,8,15,22,D].forEach(d=>{s+='<text x="'+X(d-1)+'" y="'+(H-8)+'" text-anchor="middle">'+d+'</text>'});
+  const pts=vals.map((v,i)=>X(i)+','+Y(v));
+  s+='<path d="M'+X(0)+','+Y(Math.max(lo,0))+'L'+pts.join('L')+'L'+X(el-1)+','+Y(Math.max(lo,0))+'Z" fill="color-mix(in srgb,var(--chart) 14%,transparent)"/>';
+  s+='<path d="M'+pts.join('L')+'" fill="none" stroke="var(--chart)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  s+='<line id="bal-cross" x1="0" x2="0" y1="'+top+'" y2="'+(top+ih)+'" stroke="var(--muted)" visibility="hidden"/>';
+  const last=vals[el-1];s+='<circle cx="'+X(el-1)+'" cy="'+Y(last)+'" r="5" fill="var(--chart)" stroke="var(--surface)" stroke-width="2"/>';
+  s+='<text x="'+Math.min(X(el-1),W-padR-70)+'" y="'+Math.max(top+10,Y(last)-10)+'" style="fill:var(--fg);font-weight:700">'+esc(short(last))+'</text>';
+  const step=D>1?iw/(D-1):iw;
+  for(let i=0;i<el;i++){const d=m+'-'+String(i+1).padStart(2,'0'),chg=i?vals[i]-vals[i-1]:null;
+    s+='<rect x="'+(X(i)-step/2)+'" y="'+top+'" width="'+step+'" height="'+ih+'" fill="transparent" data-cross="bal-cross" data-cx="'+X(i)+'" data-tip="'+esc(dayLabel(d)+': '+money(vals[i])+(chg?' ('+(chg>0?'+':'−')+money(Math.abs(chg))+')':''))+'"/>'}
+  return s+'</svg>';
 }
 function vActivity(){
   let ex=monthExp();
@@ -480,7 +535,7 @@ function renderCards(){
     view.innerHTML='<div id="cv-banner"></div><div style="display:flex;flex-direction:column;gap:22px"><div class="headrow"><div><h1>My cards</h1><p>Track spending on each card. Freeze one in a second if it goes missing.</p></div><button class="btn primary" data-act="new-card"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New virtual card</button></div>'
      +'<div class="tabs" role="tablist" aria-label="Card type" id="cv-tabs"></div>'
      +'<div class="cvgrid"><div class="cardlist" id="cv-list"></div><div class="cvmain" id="cv-main">'
-     +'<div class="cvtop"><div class="face" id="cv-face"><div class="row"><span style="font-weight:800;font-size:17px;letter-spacing:-.02em">Moss</span><span id="cv-kind" style="font-size:10px;font-weight:700;letter-spacing:.14em;opacity:.85"></span></div><div class="chip"></div><div class="bottom"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><span class="pan" id="cv-pan"></span><span id="cv-fname" style="font-size:12px;opacity:.9"></span></div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="opacity:.8;flex:none"><path d="M8.5 8.5a5 5 0 0 1 0 7M12 6a8.5 8.5 0 0 1 0 12M15.5 3.5a12 12 0 0 1 0 17"/></svg></div>'
+     +'<div class="cvtop"><div class="face" id="cv-face"><div class="row"><span style="font-weight:800;font-size:17px;letter-spacing:-.02em">Finlora</span><span id="cv-kind" style="font-size:10px;font-weight:700;letter-spacing:.14em;opacity:.85"></span></div><div class="chip"></div><div class="bottom"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><span class="pan" id="cv-pan"></span><span id="cv-fname" style="font-size:12px;opacity:.9"></span></div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="opacity:.8;flex:none"><path d="M8.5 8.5a5 5 0 0 1 0 7M12 6a8.5 8.5 0 0 1 0 12M15.5 3.5a12 12 0 0 1 0 17"/></svg></div>'
      +'<div class="frost" id="cv-frost" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2v20M4.9 6l14.2 12M19.1 6 4.9 18M9 3.5l3 2.5 3-2.5M9 20.5l3-2.5 3 2.5"/></svg>Card frozen</div></div>'
      +'<div class="info"><span id="cv-status"></span><div><h2 id="cv-name"></h2><span class="muted" id="cv-desc" style="font-size:13px"></span></div>'
      +'<button class="freeze" id="cv-freeze" data-act="freeze"><span class="fi">'+ICON_SNOW+'</span><span class="ft"><b id="cv-ft"></b><span id="cv-fs"></span></span><span class="switch" id="cv-switch"><i></i></span></button>'
@@ -529,18 +584,18 @@ function renderCards(){
 }
 
 /* ---------- modals ---------- */
-function openModal(html,focusSel){clearTimeout(closeModal.t);$('#modal').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">'+html+'</div></div>';setTimeout(()=>{const f=$(focusSel||'#modal input');if(f)f.focus()},30)}
+function openModal(html,focusSel){clearTimeout(closeModal.t);$('#modal').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">'+html+'</div></div>';setTimeout(()=>{const f=$(focusSel||'#modal input');if(f&&!$('#modal').contains(document.activeElement))f.focus()},30)}
 function closeModal(){
   const m=$('#modal'),sc=m.querySelector('.scrim');
   if(sc&&!RM&&!sc.classList.contains('closing')){sc.classList.add('closing');clearTimeout(closeModal.t);closeModal.t=setTimeout(()=>{if(m.querySelector('.scrim.closing'))m.innerHTML='';if(S.pending)render()},190);return}
   if(!sc||RM)m.innerHTML='';if(S.pending)render();
 }
-function openAdd(){
+function openAdd(pay){
   openModal('<h2>Add expense</h2><form id="f-add" novalidate>'
    +'<label class="field" for="a-amt">Amount ('+esc(cur())+')<input id="a-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" required></label>'
    +'<div class="two"><label class="field" for="a-cat">Category<select id="a-cat" class="input">'+cats().map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join('')+'</select></label>'
    +'<label class="field" for="a-date">Date<input id="a-date" class="input" type="date" value="'+(S.month===ym(new Date())?today():S.month+'-01')+'" required></label></div>'
-   +'<label class="field" for="a-pay">Paid from<select id="a-pay" class="input">'+payOptions(defaultPay())+'</select></label>'
+   +'<label class="field" for="a-pay">Paid from<select id="a-pay" class="input">'+payOptions(pay||defaultPay())+'</select></label>'
    +'<label class="field" for="a-note">Note<input id="a-note" class="input" maxlength="80" placeholder="e.g. Lunch with client"></label>'
    +'<label for="a-rep" style="display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 12px;border-radius:12px;background:var(--sunk);font-weight:600;cursor:pointer"><input type="checkbox" id="a-rep" style="width:20px;height:20px;accent-color:var(--accent)"><span style="display:flex;flex-direction:column"><span>Repeat this expense</span><span class="muted" id="a-rep-sub" style="font-size:12px;font-weight:500">Logs it automatically on the same day</span></span></label>'
    +'<label class="field" for="a-every" id="a-every-wrap" hidden>How often<select id="a-every" class="input">'+everyOptions(1)+'</select></label>'
@@ -611,7 +666,7 @@ document.addEventListener('click',e=>{
   if(act==='logout'){logOut().then(()=>toast('Logged out')).catch(()=>toast("Couldn't log out. Try again."));return}
   if(act==='scrim'){if(e.target===t)closeModal();return}
   if(act==='close'){closeModal();return}
-  if(act==='add'){if(!Object.keys(S.cards).length&&!S.settings){}openAdd();return}
+  if(act==='add'){openAdd(t.dataset.pay);return}
   if(act==='prev'||act==='next'){const [y,m]=S.month.split('-').map(Number);S.month=ym(new Date(y,m-1+(act==='next'?1:-1),1));S.confirm=null;render();return}
   if(act==='tab'){S.tab=t.dataset.tab;S.tabTouched=true;S.confirm=null;render();return}
   if(act==='pick'){S.sel=t.dataset.id;S.confirm=null;render();return}
@@ -624,8 +679,6 @@ document.addEventListener('click',e=>{
     S.confirm=null;const e=S.expenses[t.dataset.id],r=e&&e.recurringId&&S.recurring[e.recurringId];
     if(r){const m=String(e.date).slice(0,7),sk=(r.skipped||[]).filter(x=>x!==m).concat([m]);patch('recurring',e.recurringId,{skipped:sk})}
     del('expenses',t.dataset.id);toast(r?'Deleted. '+(r.note||'It')+' is skipped for this month only.':'Expense deleted');return}
-  if(act==='go-acct'){S.acct=t.dataset.id;return}
-  if(act==='pick-acct'){S.acct=t.dataset.id;S.confirm=null;render();return}
   if(act==='money-in'){openMoney('in',t.dataset.id);return}
   if(act==='money-tr'){openMoney('transfer',t.dataset.id);return}
   if(act==='new-acct'){openAcct(null);return}
@@ -633,7 +686,7 @@ document.addEventListener('click',e=>{
   if(act==='del-move'){S.confirm=null;del('moves',t.dataset.id);toast('Entry deleted. The balance is updated.');return}
   if(act==='del-acct'){
     if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to delete';return}
-    const a=S.accounts[t.dataset.id];del('accounts',t.dataset.id);closeModal();if(S.acct===t.dataset.id)S.acct=null;
+    const a=S.accounts[t.dataset.id];del('accounts',t.dataset.id);closeModal();if(S.acct===t.dataset.id)S.acct=null;if(S.view==='account')location.hash='accounts';
     toast((a?a.name:'Account')+' deleted. Its past expenses stay in Activity.');return}
   if(act==='add-rec'){openRec(null);return}
   if(act==='edit-rec'){openRec(t.dataset.id);return}
@@ -742,7 +795,8 @@ document.addEventListener('change',e=>{
   }
   if(t.id==='cv-range'){patch('cards',S.sel,{limit:Number(t.value)});return}
   if(t.id==='cv-acct'){const c=S.cards[S.sel];patch('cards',S.sel,{accountId:t.value});t.blur();toast(c?(t.value?c.name+' now pays from '+acctName(t.value):c.name+' is no longer linked to an account'):'Saved');return}
-  if(t.id==='r-day'&&$('#r-start')){$('#r-start').innerHTML=monthOptions(Number(t.value),$('#r-start').value);return}
+  if(t.id==='r-start'){t.dataset.touched='1';return}
+  if(t.id==='r-day'&&$('#r-start')){const st=$('#r-start');st.innerHTML=monthOptions(Number(t.value),st.dataset.touched||$('#f-rec').dataset.id?st.value:null);return}
   if(t.id==='a-rep'){$('#a-every-wrap').hidden=!t.checked}
   if((t.id==='a-date'||t.id==='a-rep')&&$('#a-rep-sub')){const d=$('#a-date').value;$('#a-rep-sub').textContent=/^\d{4}-\d{2}-\d{2}$/.test(d)?'Logs it automatically on the '+ordinal(Number(d.slice(8,10)))+' of the month':'Logs it automatically on the same day';return}
 });
@@ -766,10 +820,10 @@ document.addEventListener('pointermove',showTip);
 document.addEventListener('pointerdown',showTip);
 document.addEventListener('pointerleave',()=>{$('#tip').hidden=true});
 window.addEventListener('scroll',()=>{$('#tip').hidden=true},{passive:true});
-let rz;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(S.view==='stats')fillStats()},150)});
+let rz;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(S.view==='stats')fillStats();if(S.view==='account'){const c=$('#ch-bal');if(c)c.innerHTML=drawBal(c.clientWidth)}},150)});
 $('#view').addEventListener('focusout',()=>setTimeout(()=>{if(S.pending)render()},0));
 
-function route(){const h=(location.hash||'').slice(1);S.view=VIEWS.includes(h)?h:'overview';S.confirm=null;render();window.scrollTo(0,0)}
+function route(){const h=(location.hash||'').slice(1);if(h.startsWith('acct-')){S.view='account';S.pid=h.slice(5)}else S.view=VIEWS.includes(h)?h:'overview';S.confirm=null;render();window.scrollTo(0,0)}
 window.addEventListener('hashchange',route);
 
 /* ---------- sign in / sign out ---------- */

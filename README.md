@@ -1,4 +1,4 @@
-# Moss Budget
+# Finlora
 
 Budget tracker with cards and virtual cards (freeze, limits), category budgets, monthly
 recurring bills, statistics, and Google / email sign-in with Firebase.
