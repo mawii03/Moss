@@ -499,3 +499,23 @@ a.acct{text-decoration:none;color:var(--fg)}
 .ai.glass{width:44px;height:44px;border-radius:13px;background:rgba(255,255,255,.14) !important;color:#fff !important;border:1px solid rgba(255,255,255,.2)}
 .actbar{display:flex;flex-wrap:wrap;gap:10px}
 @media (max-width:760px){.actbar .btn{flex:1 1 calc(50% - 5px)}}
+
+/* greeting */
+.hello b{font-size:16px;font-weight:800;letter-spacing:-.01em}
+@media (max-width:760px){.topbar{padding:0}.hello b{font-size:18px}}
+
+/* profile */
+button.userbox{width:100%;border:1px solid transparent;text-align:left;cursor:pointer;font:inherit;color:inherit;transition:background .2s var(--ease),border-color .2s,transform .15s var(--ease),box-shadow .2s}
+button.userbox:hover{background:var(--surface);border-color:var(--line);box-shadow:var(--sh-1)}
+button.userbox:active{transform:scale(.98)}
+.ub-text{min-width:0;flex:1;display:flex;flex-direction:column}
+.ub-edit{flex:none;color:var(--muted);opacity:0;transform:translateX(-4px);transition:opacity .2s,transform .2s var(--ease)}
+button.userbox:hover .ub-edit,button.userbox:focus-visible .ub-edit{opacity:1;transform:none}
+button.userbox .dot{margin-left:2px}
+.m-avatar{width:40px;height:40px;border-radius:20px;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--line);padding:0;cursor:pointer}
+.prof-top{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.prof-av{width:88px;height:88px;border-radius:44px;font-size:32px;box-shadow:0 0 0 4px var(--surface),0 0 0 5px var(--line),var(--sh-2)}
+.prof-btns{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0}
+.prof-btns label.btn{cursor:pointer}
+.prof-ro{display:flex;align-items:center;background:var(--sunk);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:760px){.mtop .logout-btn{display:none}.mtop .brand span{white-space:nowrap}.mtop .month span{min-width:64px}}

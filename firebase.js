@@ -2,7 +2,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js';
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signInWithPopup, signInWithRedirect, GoogleAuthProvider, sendPasswordResetEmail, signOut,
+  signInWithPopup, signInWithRedirect, GoogleAuthProvider, sendPasswordResetEmail, signOut, updateProfile,
 } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
@@ -23,6 +23,7 @@ export function logIn(email, password) { return signInWithEmailAndPassword(auth,
 export function signUp(email, password) { return createUserWithEmailAndPassword(auth, email, password); }
 export function resetPassword(email) { return sendPasswordResetEmail(auth, email); }
 export function logOut() { return signOut(auth); }
+export function saveDisplayName(name) { return auth.currentUser ? updateProfile(auth.currentUser, { displayName: name }) : Promise.resolve(); }
 export async function logInWithGoogle() {
   const provider = new GoogleAuthProvider();
   // Popups are often blocked on phones, so fall back to a full-page redirect.

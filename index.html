@@ -4,11 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#1F6B47">
-<<<<<<< HEAD
 <title>Finlora</title>
-=======
-<title>Finlora Budget</title>
->>>>>>> 973dc7acd926acf7ffc061b3d9980e37142372aa
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
@@ -61,6 +57,7 @@
     <div class="brand"><div class="logo"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 19V8a3 3 0 0 1 3-3h8"/><path d="M5 12h9"/><path d="M14 19a5 5 0 0 0 5-5"/></svg></div><div><b>Finlora</b><span id="m-total" class="num">Budget tracker</span></div></div>
     <div style="display:flex;align-items:center;gap:6px">
       <div class="month" aria-label="Month"><button data-act="prev" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><span class="m-label" style="min-width:72px;font-size:13px"></span><button data-act="next" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></div>
+      <button type="button" class="m-avatar avatar" id="m-avatar" data-act="profile" aria-label="Edit your profile">?</button>
       <button class="iconbtn logout-btn" data-act="logout" aria-label="Log out"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg></button>
     </div>
   </div>
@@ -78,21 +75,22 @@
       <a href="#accounts" data-nav="accounts"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><path d="M16 14h.01"/></svg>My money</a>
       <a href="#cards" data-nav="cards"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>Cards</a>
     </nav>
-    <div class="userbox">
-      <div class="avatar" id="u-avatar" aria-hidden="true">?</div>
-      <div style="min-width:0;flex:1">
+    <button type="button" class="userbox" data-act="profile" aria-label="Edit your profile">
+      <span class="avatar" id="u-avatar" aria-hidden="true">?</span>
+      <span class="ub-text">
         <b id="u-name">Signed in</b>
         <span id="sync-txt">Connecting…</span>
-      </div>
+      </span>
       <span class="dot" id="sync-dot" style="background:var(--track)"></span>
-    </div>
+      <svg class="ub-edit" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
+    </button>
     <button class="btn small logout-btn" data-act="logout"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Log out</button>
   </aside>
 
   <main>
-    <div class="topbar deskonly">
+    <div class="topbar">
       <div class="hello"><b id="greet">Hello</b><span id="today-lbl"></span></div>
-      <div class="month" aria-label="Month"><button data-act="prev" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><span class="m-label"></span><button data-act="next" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></div>
+      <div class="month deskonly" aria-label="Month"><button data-act="prev" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><span class="m-label"></span><button data-act="next" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></div>
     </div>
     <div id="view"></div>
   </main>

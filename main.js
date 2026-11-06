@@ -1,4 +1,4 @@
-import {configured,watchUser,logIn,signUp,logInWithGoogle,resetPassword,logOut,userStore} from './firebase.js';
+import {configured,watchUser,logIn,signUp,logInWithGoogle,resetPassword,logOut,userStore,saveDisplayName} from './firebase.js';
 
 const $=(s,el)=>(el||document).querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -164,7 +164,7 @@ function setSync(state){
 let unsubs=[];
 function disconnect(){
   unsubs.forEach(u=>{try{u()}catch(e){}});unsubs=[];
-  Object.assign(S,{db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),seeding:false,acct:null,lastPay:null,sel:null,faceId:null,confirm:null});
+  Object.assign(S,{profile:null,db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),seeding:false,acct:null,lastPay:null,sel:null,faceId:null,confirm:null});
   $('#view').innerHTML='';$('#view').dataset.view='';closeModal();
 }
 function connect(uid){
@@ -178,6 +178,7 @@ function connect(uid){
   unsubs.push(store.subscribe('accounts',onCol('accounts','accts'),fail));
   unsubs.push(store.subscribe('moves',onCol('moves','moves'),fail));
   unsubs.push(store.subscribeDoc('settings','moss',d=>{S.settings=d;S.loaded.set=true;render()},fail));
+  unsubs.push(store.subscribeDoc('profile','main',d=>{S.profile=d;paintUser();render()},fail));
   render();
 }
 window.addEventListener('offline',()=>{if(S.db)setSync('offline')});
@@ -195,7 +196,7 @@ function render(){
   document.querySelectorAll('[data-nav]').forEach(el=>{if(el.dataset.nav===(S.view==='account'?'accounts':S.view))el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')});
   document.querySelectorAll('.m-label').forEach(el=>el.textContent=monthLabel(S.month,el.closest('.mtop')));
   const ex=monthExp();$('#m-total').textContent=money(sum(ex))+' this month';
-  const h=new Date().getHours();$('#greet').textContent=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
+  $('#greet').textContent=greeting();
   $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',account:(S.accounts[S.pid]||{}).name||'Account',accounts:'My money',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
   $('#tip').hidden=true;
   if(S.view==='cards'){renderCards();afterRender(enter);return}
@@ -221,6 +222,21 @@ function afterRender(enter){
     el.textContent=plus+money(0);requestAnimationFrame(step);
   });
 }
+
+/* Greeting: changes with the time of day and uses the name you chose (or your account name). */
+function firstName(){
+  const nick=S.settings&&String(S.settings.nickname||'').trim();if(nick)return nick;
+  const pn=S.profile&&String(S.profile.name||'').trim();if(pn)return pn.split(/\s+/)[0];
+  const u=S.user;if(!u)return '';
+  if(u.displayName)return u.displayName.trim().split(/\s+/)[0];
+  const local=String(u.email||'').split('@')[0].replace(/[^A-Za-z]+/g,' ').trim().split(' ')[0]||'';
+  return local?local[0].toUpperCase()+local.slice(1).toLowerCase():'';
+}
+function greeting(){
+  const h=new Date().getHours(),g=h<12?'Good morning':h<18?'Good afternoon':'Good evening',n=firstName();
+  return n?g+', '+n:g;
+}
+setInterval(()=>{const el=$('#greet');if(el&&S.user)el.textContent=greeting()},60000);
 
 /* ---------- statistics ---------- */
 function monthTotal(m){return sum(expList().filter(e=>String(e.date||'').startsWith(m)))}
@@ -524,7 +540,7 @@ function vBudgets(){
       return '<div class="brow"><span class="namecell"><span class="dot" style="background:'+catColor(c.id)+'"></span><label class="sr" for="cn-'+esc(c.id)+'">Category name</label><input id="cn-'+esc(c.id)+'" class="input" data-cat="'+esc(c.id)+'" data-field="name" value="'+esc(c.name)+'" maxlength="40"></span><span><label class="sr" for="cb-'+esc(c.id)+'">Budget for '+esc(c.name)+'</label><input id="cb-'+esc(c.id)+'" class="input num" type="number" inputmode="decimal" min="0" step="any" data-cat="'+esc(c.id)+'" data-field="budget" value="'+(b||'')+'" placeholder="0"></span><span class="spentcell num '+(b>0&&s>b?'':'muted')+'" style="'+(b>0&&s>b?'color:var(--bad);font-weight:700':'')+'">'+esc(money(s))+'</span>'+delBtn+'</div>'}).join('')
     +'</div>'+(S.confirm&&S.confirm.startsWith('cat:')?'<p class="muted" style="margin:0;font-size:13px">Tap the red button to remove that category. Its past expenses stay, listed as Uncategorized.</p>':'')
     +'<form id="add-cat" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"><label class="field" for="nc-name" style="flex:2 1 180px">New category<input id="nc-name" class="input" maxlength="40" placeholder="e.g. Pets" required></label><label class="field" for="nc-budget" style="flex:1 1 120px">Budget<input id="nc-budget" class="input num" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></label><button class="btn" type="submit">Add category</button></form></section>';
-  html+='<section class="panel"><h2>CURRENCY</h2><label class="field" for="set-cur" style="max-width:200px">Symbol shown before amounts<input id="set-cur" class="input" maxlength="4" value="'+esc(cur())+'"></label></section>';
+  html+='<section class="panel"><h2>CURRENCY &amp; PROFILE</h2><div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end"><label class="field" for="set-cur" style="flex:0 1 200px">Currency symbol<input id="set-cur" class="input" maxlength="4" value="'+esc(cur())+'"></label><button class="btn" data-act="profile">Edit name &amp; photo</button></div></section>';
   return html;
 }
 
@@ -626,6 +642,32 @@ function openAcct(id){
    +(a?'<p class="muted" style="margin:0;font-size:12px">Changing the balance adds a correction entry, so your history stays right.</p>':'')
    +'<p class="err" id="ac-err" hidden></p><div class="actions">'+(a?'<button type="button" class="btn danger" data-act="del-acct" data-id="'+esc(id)+'" style="margin-right:auto">'+ICON_TRASH+'Delete</button>':'')+'<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(a?'Save':'Create account')+'</button></div></form>','#ac-name');
 }
+function openProfile(){
+  const u=S.user||{},name=profileName(),photo=profilePhoto();
+  S.draftPhoto=undefined;
+  openModal('<h2>Your profile</h2><form id="f-prof" novalidate>'
+   +'<div class="prof-top"><span class="avatar prof-av" id="p-av"></span><div class="prof-btns">'
+   +'<label class="btn small" for="p-file"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-3h6l2 3h3v13H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Change photo</label>'
+   +'<input type="file" id="p-file" accept="image/*" class="sr">'
+   +'<button type="button" class="btn small danger" data-act="photo-remove"'+(photo?'':' hidden')+' id="p-remove">Remove photo</button>'
+   +'<span class="muted" style="font-size:12px">JPG or PNG. It\'s cropped to a square.</span></div></div>'
+   +'<label class="field" for="p-name">Full name<input id="p-name" class="input" maxlength="40" autocomplete="name" value="'+esc(name===u.email?'':name)+'" placeholder="e.g. Mau Chen"></label>'
+   +'<label class="field" for="p-nick">Name for the greeting<input id="p-nick" class="input" maxlength="20" value="'+esc((S.settings&&S.settings.nickname)||'')+'" placeholder="'+esc(firstName()||'e.g. Mau')+'"></label>'
+   +'<div class="field">Email<span class="input prof-ro">'+esc(u.email||'—')+'</span></div>'
+   +'<p class="err" id="p-err" hidden></p><div class="actions"><button type="button" class="btn danger" data-act="logout" style="margin-right:auto"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Log out</button><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">Save profile</button></div></form>','#p-name');
+  paintAvatar($('#p-av'),name,photo);
+}
+/* Shrink a picked photo to a 256px square JPEG so it fits in your Firestore profile. */
+function squarePhoto(file){
+  return new Promise((res,rej)=>{
+    if(!file||!/^image\//.test(file.type))return rej(new Error('type'));
+    if(file.size>15*1024*1024)return rej(new Error('size'));
+    const url=URL.createObjectURL(file),img=new Image();
+    img.onload=()=>{const n=256,c=document.createElement('canvas');c.width=c.height=n;const k=Math.min(img.naturalWidth,img.naturalHeight),x=(img.naturalWidth-k)/2,y=(img.naturalHeight-k)/2;
+      const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,n,n);g.imageSmoothingQuality='high';g.drawImage(img,x,y,k,k,0,0,n,n);URL.revokeObjectURL(url);res(c.toDataURL('image/jpeg',.86))};
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('read'))};img.src=url;
+  });
+}
 function startOptions(day){
   return monthOptions(day,null);
 }
@@ -663,7 +705,7 @@ function openNewCard(){
 document.addEventListener('click',e=>{
   const t=e.target.closest('[data-act]');if(!t)return;
   const act=t.dataset.act;
-  if(act==='logout'){logOut().then(()=>toast('Logged out')).catch(()=>toast("Couldn't log out. Try again."));return}
+  if(act==='logout'){closeModal();logOut().then(()=>toast('Logged out')).catch(()=>toast("Couldn't log out. Try again."));return}
   if(act==='scrim'){if(e.target===t)closeModal();return}
   if(act==='close'){closeModal();return}
   if(act==='add'){openAdd(t.dataset.pay);return}
@@ -688,6 +730,8 @@ document.addEventListener('click',e=>{
     if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to delete';return}
     const a=S.accounts[t.dataset.id];del('accounts',t.dataset.id);closeModal();if(S.acct===t.dataset.id)S.acct=null;if(S.view==='account')location.hash='accounts';
     toast((a?a.name:'Account')+' deleted. Its past expenses stay in Activity.');return}
+  if(act==='profile'){openProfile();return}
+  if(act==='photo-remove'){S.draftPhoto='none';paintAvatar($('#p-av'),$('#p-name').value||profileName(),'');t.hidden=true;return}
   if(act==='add-rec'){openRec(null);return}
   if(act==='edit-rec'){openRec(t.dataset.id);return}
   if(act==='toggle-rec'){const r=S.recurring[t.dataset.id];if(!r)return;
@@ -776,6 +820,16 @@ document.addEventListener('submit',e=>{
     put('accounts',nid,{name,type,start:Math.round(bal*100)/100,order,createdAt:Date.now()});
     S.acct=nid;closeModal();toast(name+' created');render();return;
   }
+  if(f.id==='f-prof'){
+    const name=$('#p-name').value.trim().slice(0,40),nick=$('#p-nick').value.trim().slice(0,20);
+    const data={name,updatedAt:Date.now()};
+    if(S.draftPhoto!==undefined)data.photo=S.draftPhoto;else if(S.profile&&S.profile.photo)data.photo=S.profile.photo;
+    S.profile=Object.assign({},S.profile||{},data);
+    if(S.db)S.db.put('profile','main',S.profile).catch(e=>toast(errMsg(e)));
+    if((S.settings&&S.settings.nickname||'')!==nick){S.settings=Object.assign({},S.settings||{},{nickname:nick});saveSettings({nickname:nick})}
+    if(name)saveDisplayName(name).catch(()=>{});
+    paintUser();closeModal();toast('Profile saved');return;
+  }
   if(f.id==='add-cat'){
     const name=$('#nc-name').value.trim();if(!name)return;
     const budget=parseFloat($('#nc-budget').value)||0;
@@ -787,7 +841,10 @@ document.addEventListener('change',e=>{
   const t=e.target;
   if(t.id==='f-cat'){S.fCat=t.value;t.blur();render();return}
   if(t.id==='f-card'){S.fCard=t.value;t.blur();render();return}
+  if(t.id==='p-file'){const f=t.files&&t.files[0];if(!f)return;const err=$('#p-err');err.hidden=true;
+    squarePhoto(f).then(d=>{S.draftPhoto=d;paintAvatar($('#p-av'),'',d);$('#p-remove').hidden=false}).catch(e=>{err.textContent=e.message==='size'?'That photo is too big. Pick one under 15 MB.':'That file isn\'t a photo we can read. Try a JPG or PNG.';err.hidden=false});t.value='';return}
   if(t.id==='set-cur'){const v=t.value.trim()||'NT$';saveSettings({currency:v});return}
+  if(t.id==='set-nick'){const v=t.value.trim().slice(0,20);S.settings=Object.assign({},S.settings||{},{nickname:v});$('#greet').textContent=greeting();saveSettings({nickname:v});toast(v?'Hi, '+v+'! Your greeting is updated.':'Using the name from your account.');return}
   if(t.dataset&&t.dataset.cat){
     const id=t.dataset.cat,field=t.dataset.field;
     const next=cats().map(c=>c.id!==id?c:Object.assign({},c,field==='budget'?{budget:Math.max(0,parseFloat(t.value)||0)}:{name:t.value.trim()||c.name}));
@@ -823,7 +880,7 @@ window.addEventListener('scroll',()=>{$('#tip').hidden=true},{passive:true});
 let rz;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(S.view==='stats')fillStats();if(S.view==='account'){const c=$('#ch-bal');if(c)c.innerHTML=drawBal(c.clientWidth)}},150)});
 $('#view').addEventListener('focusout',()=>setTimeout(()=>{if(S.pending)render()},0));
 
-function route(){const h=(location.hash||'').slice(1);if(h.startsWith('acct-')){S.view='account';S.pid=h.slice(5)}else S.view=VIEWS.includes(h)?h:'overview';S.confirm=null;render();window.scrollTo(0,0)}
+function route(){const ae=document.activeElement;if(ae&&ae!==document.body&&$('#view').contains(ae))ae.blur();const h=(location.hash||'').slice(1);if(h.startsWith('acct-')){S.view='account';S.pid=h.slice(5)}else S.view=VIEWS.includes(h)?h:'overview';S.confirm=null;render();window.scrollTo(0,0)}
 window.addEventListener('hashchange',route);
 
 /* ---------- sign in / sign out ---------- */
@@ -853,18 +910,26 @@ function authErr(e){
   return 'Something went wrong signing in. Try again.';
 }
 function busy(on){['#auth-submit','#auth-google'].forEach(s=>{$(s).disabled=on})}
-function setUser(u){
-  const name=u.displayName||u.email||'Signed in';$('#u-name').textContent=name;
-  const av=$('#u-avatar');av.textContent='';
-  if(u.photoURL){const img=document.createElement('img');img.src=u.photoURL;img.alt='';img.referrerPolicy='no-referrer';av.appendChild(img)}
-  else av.textContent=(name.trim()[0]||'?').toUpperCase();
+function setUser(u){S.user=u;paintUser()}
+function profileName(){const u=S.user||{};return (S.profile&&String(S.profile.name||'').trim())||u.displayName||u.email||'Signed in'}
+function safePhoto(src){return typeof src==='string'&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(src)?src:''}
+function profilePhoto(){const u=S.user||{};const own=safePhoto(S.profile&&S.profile.photo);if(own)return own;if(S.profile&&S.profile.photo==='none')return '';return /^https:\/\//.test(u.photoURL||'')?u.photoURL:''}
+function paintAvatar(el,name,photo){
+  if(!el)return;el.textContent='';
+  if(photo){const img=document.createElement('img');img.src=photo;img.alt='';img.referrerPolicy='no-referrer';el.appendChild(img)}
+  else el.textContent=(String(name).trim()[0]||'?').toUpperCase();
+}
+function paintUser(){
+  if(!S.user)return;const name=profileName(),photo=profilePhoto();
+  $('#u-name').textContent=name;paintAvatar($('#u-avatar'),name,photo);paintAvatar($('#m-avatar'),name,photo);
+  const g=$('#greet');if(g)g.textContent=greeting();
 }
 function startAuth(){
   if(!configured){show('auth');busy(true);authMsg("Firebase isn't set up yet. Add your project's keys to the .env file, then restart (see README).",'');return}
   show('loading');
   watchUser(user=>{
     if(user){setUser(user);show('app');connect(user.uid);route()}
-    else{disconnect();show('auth');setMode('login')}
+    else{S.user=null;disconnect();show('auth');setMode('login')}
   });
   $('#auth-switch').addEventListener('click',()=>setMode(authMode==='login'?'signup':'login'));
   $('#auth-google').addEventListener('click',async()=>{authMsg('','');busy(true);try{await logInWithGoogle()}catch(e){authMsg(authErr(e),'')}finally{busy(false)}});
