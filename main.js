@@ -50,7 +50,23 @@ function dim(m){const [y,mo]=m.split('-').map(Number);return new Date(y,mo,0).ge
 function addMonths(m,n){const [y,mo]=m.split('-').map(Number);return ym(new Date(y,mo-1+n,1))}
 function ordinal(n){const s=['th','st','nd','rd'],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])}
 function recList(){return Object.entries(S.recurring).map(([id,r])=>Object.assign({id},r)).sort((a,b)=>(a.day||0)-(b.day||0))}
-function acctList(){return Object.entries(S.accounts).map(([id,a])=>Object.assign({id},a)).sort((a,b)=>(a.order||0)-(b.order||0))}
+function acctList(){return Object.entries(S.accounts).filter(([,a])=>!a.hidden).map(([id,a])=>Object.assign({id},a)).sort((a,b)=>(a.id==='other')-(b.id==='other')||(a.order||0)-(b.order||0))}
+/* Removed accounts you can bring back: hidden ones (with their history) + any default that was fully deleted before. */
+function removedAccts(){
+  const list=Object.entries(S.accounts).filter(([,a])=>a.hidden).map(([id,a])=>({id,name:a.name,type:a.type,order:a.order||0}));
+  DEFAULT_ACCTS.forEach(([type,name],i)=>{if(!S.accounts[type])list.push({id:type,name,type,order:i+1,fresh:true})});
+  return list.filter(x=>!isCash(x.id)).sort((a,b)=>a.order-b.order);
+}
+const isCash=id=>id==='cash'||id==='other'; // Cash and Others are always kept
+/* Cash and Others can't be removed: if either is missing or hidden (from an older version), bring it back. */
+function ensureFixed(){
+  if(!S.db||!S.loaded.accts||!S.loaded.set||!(S.settings&&S.settings.accountsSeeded)||S.fixing)return;
+  [['cash','Cash',1],['other','Others',5]].forEach(([id,name,order])=>{
+    const a=S.accounts[id];
+    if(!a){S.fixing=true;const d={name,type:id,start:0,order,createdAt:Date.now()};S.accounts[id]=d;put('accounts',id,d);S.fixing=false}
+    else if(a.hidden){S.accounts[id]=Object.assign({},a,{hidden:false});patch('accounts',id,{hidden:false})}
+  });
+}
 function moveList(){return Object.entries(S.moves).map(([id,m])=>Object.assign({id},m))}
 function acctIcon(type,cls){const T=ACCT_TYPES[type]||ACCT_TYPES.other;return '<span class="'+(cls||'ai')+'" style="color:'+T.color+';background:color-mix(in srgb,'+T.color+' 15%,transparent)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+T.path+'</svg></span>'}
 /* Balance = starting amount + money added + transfers in − transfers out − expenses paid from it. */
@@ -100,8 +116,8 @@ function payOptions(cur){
 function payValue(x){return x.cardId?'c:'+x.cardId:x.accountId?'a:'+x.accountId:''}
 function readPay(v){v=v||'';if(v.startsWith('c:')){const id=v.slice(2),c=S.cards[id];return {cardId:id,accountId:(c&&c.accountId)||''}}if(v.startsWith('a:'))return {cardId:'',accountId:v.slice(2)};return {cardId:'',accountId:''}}
 function defaultPay(){
-  if(S.lastPay&&(S.lastPay.startsWith('a:')?S.accounts[S.lastPay.slice(2)]:S.cards[S.lastPay.slice(2)]&&!S.cards[S.lastPay.slice(2)].frozen))return S.lastPay;
-  if(S.accounts.cash)return 'a:cash';const a=acctList()[0];return a?'a:'+a.id:'';
+  if(S.lastPay&&(S.lastPay.startsWith('a:')?(S.accounts[S.lastPay.slice(2)]&&!S.accounts[S.lastPay.slice(2)].hidden):S.cards[S.lastPay.slice(2)]&&!S.cards[S.lastPay.slice(2)].frozen))return S.lastPay;
+  if(S.accounts.cash&&!S.accounts.cash.hidden)return 'a:cash';const a=acctList()[0];return a?'a:'+a.id:'';
 }
 function seedAccounts(){
   if(S.seeding||!S.loaded.accts||!S.loaded.set||!S.db)return;
@@ -210,7 +226,7 @@ window.addEventListener('online',()=>{if(S.db)setSync('live')});
 
 /* ---------- render ---------- */
 function render(){
-  runRecurring();seedAccounts();
+  runRecurring();seedAccounts();ensureFixed();
   const view=$('#view'),a=document.activeElement;
   if(a&&view.contains(a)&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)){S.pending=true;return}
   S.pending=false;
@@ -471,8 +487,11 @@ function vAccounts(){
     +'<div class="stats"><div class="stat"><span>Came in · '+esc(mname)+'</span><b class="num" style="color:var(--accent)">+'+esc(money(tin))+'</b></div><div class="stat"><span>Went out · '+esc(mname)+'</span><b class="num">−'+esc(money(tout))+'</b></div></div></section>';
   {const dt=debtTotals();html+=(dt.owe>0||dt.lend>0)?debtStrip(dt):'<a class="panel debt-strip" href="#debts"><span class="ds-item"><span>Debts</span><b>Track money you owe or lent</b></span><span class="go" aria-hidden="true">›</span></a>'}
   html+='<div class="acctgrid">'+al.map(a=>{const b=balance(a.id),f=acctFlow(a.id,m);
+    if(a.id==='other')return '<div class="acct others-tile"><a class="others-link" href="#acct-other"><span class="top">'+acctIcon(a.type)+'<span class="nm">'+esc(a.name)+'</span>'+(b<0?'<span class="pill bad">Below zero</span>':'<span class="go" aria-hidden="true">›</span>')+'</span><span class="bal num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span><small class="num">+'+esc(money(f.inn))+' in · −'+esc(money(f.out))+' out</small></a><button class="btn small new-acct-btn" data-act="new-acct">+ New account</button></div>';
     return '<a class="acct" href="#acct-'+esc(a.id)+'"><span class="top">'+acctIcon(a.type)+'<span class="nm">'+esc(a.name)+'</span>'+(b<0?'<span class="pill bad">Below zero</span>':'<span class="go" aria-hidden="true">›</span>')+'</span><span class="bal num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span><small class="num">+'+esc(money(f.inn))+' in · −'+esc(money(f.out))+' out in '+esc(mname)+'</small></a>'}).join('')
-    +'<button class="acct new" data-act="new-acct">+ New account</button></div>';
+    +(S.accounts.other&&!S.accounts.other.hidden?'':'<button class="acct new" data-act="new-acct">+ New account</button>')+'</div>';
+  const gone=removedAccts();
+  if(gone.length)html+='<section class="addback"><h2>ADD BACK</h2><div class="addback-row">'+gone.map(g=>'<button class="addback-chip" data-act="restore-acct" data-id="'+esc(g.id)+'">'+acctIcon(g.type,'ai sm')+'<span>+ '+esc(g.name)+'</span></button>').join('')+'</div><p class="muted" style="margin:0;font-size:12px">Removed accounts keep their history. Adding one back brings back its balance too.</p></section>';
   return html;
 }
 function balanceOn(id,d){
@@ -486,12 +505,13 @@ function acctBills(id){return recList().filter(r=>{const c=S.cards[r.cardId];ret
 function vAccount(){
   const id=S.pid,a=S.accounts[id],m=S.month,mname=monthLabel(m).split(' ')[0];
   const back='<a class="back" href="#accounts"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>My money</a>';
+  if(a&&a.hidden)return back+'<div class="empty"><b>'+esc(a.name)+' is removed</b>Add it back to see it again.<div style="margin-top:12px"><button class="btn primary" data-act="restore-acct" data-id="'+esc(id)+'">+ Add '+esc(a.name)+' back</button></div></div>';
   if(!a)return back+'<div class="empty"><b>'+(S.loaded.accts?'This account doesn\'t exist anymore':'Loading…')+'</b>'+(S.loaded.accts?'It may have been deleted. Go back to My money to see your accounts.':'')+'</div>';
   const T=ACCT_TYPES[a.type]||ACCT_TYPES.other,b=balance(id),f=acctFlow(id,m),net=f.inn-f.out;
   let html=back;
-  html+='<section class="hero acct-hero" aria-label="'+esc(a.name)+' balance"><div class="main"><span class="acct-id">'+acctIcon(a.type,'ai glass')+'<span><b>'+esc(a.name)+'</b><span>'+(a.name.trim().toLowerCase()===T.label.toLowerCase()?'Account':esc(T.label)+' account')+'</span></span></span><span class="muted" style="font-weight:600;margin-top:6px">Money left</span><span class="big num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span></div>'
+  html+='<section class="hero acct-hero" aria-label="'+esc(a.name)+' balance"><div class="main"><span class="acct-id">'+acctIcon(a.type,'ai glass')+'<span><button type="button" class="acct-rename" data-act="rename-acct" data-id="'+esc(id)+'" title="Rename"><b>'+esc(a.name)+'</b><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><span class="sr">Rename '+esc(a.name)+'</span></button><span>'+(a.name.trim().toLowerCase()===T.label.toLowerCase()?'Account':esc(T.label)+' account')+'</span></span></span><span class="muted" style="font-weight:600;margin-top:6px">Money left</span><span class="big num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span></div>'
     +'<div class="stats"><div class="stat"><span>Came in · '+esc(mname)+'</span><b class="num" style="color:var(--accent)">+'+esc(money(f.inn))+'</b></div><div class="stat"><span>Went out · '+esc(mname)+'</span><b class="num">−'+esc(money(f.out))+'</b></div><div class="stat"><span>Net · '+esc(mname)+'</span><b class="num" style="color:'+(net<0?'var(--bad)':'var(--accent)')+'">'+(net<0?'−':'+')+esc(money(Math.abs(net)))+'</b></div></div></section>';
-  html+='<div class="actbar"><button class="btn primary" data-act="money-in" data-id="'+esc(id)+'">+ Add money</button><button class="btn" data-act="money-tr" data-id="'+esc(id)+'">'+ICON_REPEAT+'Transfer</button><button class="btn" data-act="add" data-pay="a:'+esc(id)+'"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>Add expense</button><button class="btn" data-act="edit-acct" data-id="'+esc(id)+'">'+ICON_EDIT+'Edit</button></div>';
+  html+='<div class="actbar"><button class="btn primary" data-act="money-in" data-id="'+esc(id)+'">+ Add money</button><button class="btn" data-act="money-tr" data-id="'+esc(id)+'">'+ICON_REPEAT+'Transfer</button><button class="btn" data-act="add" data-pay="a:'+esc(id)+'"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>Add expense</button><button class="btn" data-act="edit-acct" data-id="'+esc(id)+'">'+ICON_EDIT+'Edit</button>'+(id==='other'?'<button class="btn" data-act="new-acct">+ New account</button>':'')+'</div>';
   // balance chart + where it went
   const ex=expList().filter(e=>e.accountId===id&&String(e.date||'').startsWith(m)),spent=sum(ex);
   const byCat=cats().map(c=>({c,s:sum(ex.filter(e=>e.category===c.id))})).filter(x=>x.s>0).sort((x,y)=>y.s-x.s);
@@ -782,7 +802,7 @@ function openAcct(id){
    +'<label class="field" for="ac-type">Type<select id="ac-type" class="input">'+Object.entries(ACCT_TYPES).map(([k,T])=>'<option value="'+k+'"'+((a?a.type:'other')===k?' selected':'')+'>'+esc(T.label)+'</option>').join('')+'</select></label></div>'
    +'<label class="field" for="ac-bal">'+(a?'Current balance':'How much is in it now')+' ('+esc(cur())+')<input id="ac-bal" class="input amount num" type="number" inputmode="decimal" step="any" placeholder="0" value="'+(a?balance(id):'')+'"></label>'
    +(a?'<p class="muted" style="margin:0;font-size:12px">Changing the balance adds a correction entry, so your history stays right.</p>':'')
-   +'<p class="err" id="ac-err" hidden></p><div class="actions">'+(a?'<button type="button" class="btn danger" data-act="del-acct" data-id="'+esc(id)+'" style="margin-right:auto">'+ICON_TRASH+'Delete</button>':'')+'<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(a?'Save':'Create account')+'</button></div></form>','#ac-name');
+   +'<p class="err" id="ac-err" hidden></p><div class="actions">'+(a&&!isCash(id)?'<button type="button" class="btn danger" data-act="del-acct" data-id="'+esc(id)+'" style="margin-right:auto">'+ICON_TRASH+'Remove</button>':a?'<span class="muted" style="margin-right:auto;font-size:12px;align-self:center">'+(id==='cash'?'Cash':'Others')+' is always kept.</span>':'')+'<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(a?'Save':'Create account')+'</button></div></form>','#ac-name');
 }
 function openProfile(){
   const u=S.user||{},name=profileName(),photo=profilePhoto();
@@ -895,11 +915,19 @@ document.addEventListener('click',e=>{
   if(act==='money-tr'){openMoney('transfer',t.dataset.id);return}
   if(act==='new-acct'){openAcct(null);return}
   if(act==='edit-acct'){openAcct(t.dataset.id);return}
+  if(act==='rename-acct'){openAcct(t.dataset.id);setTimeout(()=>{const n=$('#ac-name');if(n){n.focus();n.select()}},60);return}
   if(act==='del-move'){S.confirm=null;del('moves',t.dataset.id);toast('Entry deleted. The balance is updated.');return}
   if(act==='del-acct'){
-    if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to delete';return}
-    const a=S.accounts[t.dataset.id];del('accounts',t.dataset.id);closeModal();if(S.acct===t.dataset.id)S.acct=null;if(S.view==='account')location.hash='accounts';
-    toast((a?a.name:'Account')+' deleted. Its past expenses stay in Activity.');return}
+    if(isCash(t.dataset.id))return;
+    if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to remove';return}
+    const a=S.accounts[t.dataset.id];S.accounts[t.dataset.id]=Object.assign({},a,{hidden:true});patch('accounts',t.dataset.id,{hidden:true});closeModal();if(S.acct===t.dataset.id)S.acct=null;
+    if(S.view==='account')location.hash='accounts';else render();
+    toast((a?a.name:'Account')+' removed. You can add it back anytime on My money.');return}
+  if(act==='restore-acct'){
+    const id=t.dataset.id,d=DEFAULT_ACCTS.find(x=>x[0]===id);
+    if(S.accounts[id]){S.accounts[id]=Object.assign({},S.accounts[id],{hidden:false});patch('accounts',id,{hidden:false})}
+    else if(d){const data={name:d[1],type:d[0],start:0,order:DEFAULT_ACCTS.indexOf(d)+1,createdAt:Date.now()};S.accounts[id]=data;put('accounts',id,data)}
+    render();toast(((S.accounts[id]||{}).name||'Account')+' is back');return}
   if(act==='chk'){const c=S.checklist[t.dataset.id];if(!c)return;
     if(c.monthly!==false){const pm=new Set(c.paidMonths||[]);const was=pm.has(S.month);was?pm.delete(S.month):pm.add(S.month);const v=[...pm].sort();S.checklist[t.dataset.id]=Object.assign({},c,{paidMonths:v});patch('checklist',t.dataset.id,{paidMonths:v});if(!was)toast('✓ '+c.title+' paid for '+monthLabel(S.month).split(' ')[0])}
     else{S.checklist[t.dataset.id]=Object.assign({},c,{done:!c.done});patch('checklist',t.dataset.id,{done:!c.done})}

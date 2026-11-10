@@ -664,3 +664,32 @@ a.debt-strip:hover .go{transform:translateX(3px);color:var(--accent)}
 .nt-pin input{width:18px;height:18px;accent-color:var(--accent)}
 #view.enter .chk-list>li{animation:rise .45s var(--ease) both}
 #view.enter .notes-grid>*{animation:rise .5s .1s var(--ease) both}
+
+/* account page: tap the name to rename */
+.acct-rename{display:inline-flex;align-items:center;gap:8px;border:0;background:transparent;color:inherit;font:inherit;padding:2px 8px;margin:-2px -8px;border-radius:10px;cursor:pointer;transition:background .2s var(--ease)}
+.acct-rename b{font-size:18px;font-weight:800;letter-spacing:-.02em}
+.acct-rename svg{opacity:.7;transition:opacity .2s,transform .2s var(--ease)}
+.acct-rename:hover{background:rgba(255,255,255,.12)}
+.acct-rename:hover svg{opacity:1;transform:rotate(-8deg)}
+.acct-rename:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.acct-id>span{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.acct-rename b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60vw}
+
+/* add back removed accounts */
+.addback{display:flex;flex-direction:column;gap:10px}
+.addback h2{font-size:11px;font-weight:800;letter-spacing:.11em;color:var(--muted)}
+.addback-row{display:flex;flex-wrap:wrap;gap:8px}
+.addback-chip{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 14px 0 6px;border-radius:14px;border:1.5px dashed var(--line-2);background:transparent;color:var(--fg);font:inherit;font-weight:700;cursor:pointer;transition:border-color .2s,background .2s,transform .15s var(--ease)}
+.addback-chip:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.addback-chip:active{transform:scale(.97)}
+.ai.sm{width:32px;height:32px;border-radius:9px}
+.ai.sm svg{width:16px;height:16px}
+
+/* Others tile also holds "+ New account" */
+.others-tile{padding:0;gap:0;cursor:default}
+.others-link{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:16px 16px 10px;text-decoration:none;color:var(--fg);width:100%;border-radius:inherit}
+.others-tile:hover{transform:none}
+.others-link:hover .go{transform:translateX(3px);color:var(--accent)}
+.new-acct-btn{margin:0 12px 12px;align-self:stretch;justify-content:center;border-style:dashed;color:var(--accent);font-weight:700}
+.new-acct-btn:hover{background:var(--accent-soft);border-color:var(--accent)}
+@media (max-width:760px){.others-link{padding:12px 12px 8px}.new-acct-btn{margin:0 10px 10px}}
