@@ -693,3 +693,6 @@ a.debt-strip:hover .go{transform:translateX(3px);color:var(--accent)}
 .new-acct-btn{margin:0 12px 12px;align-self:stretch;justify-content:center;border-style:dashed;color:var(--accent);font-weight:700}
 .new-acct-btn:hover{background:var(--accent-soft);border-color:var(--accent)}
 @media (max-width:760px){.others-link{padding:12px 12px 8px}.new-acct-btn{margin:0 10px 10px}}
+.acct.new{flex-direction:column;gap:6px}
+.new-plus{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-size:22px;font-weight:600;line-height:1;background:var(--accent-soft);color:var(--accent);transition:transform .25s var(--ease)}
+.acct.new:hover .new-plus{transform:rotate(90deg)}
