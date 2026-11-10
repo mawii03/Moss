@@ -489,8 +489,7 @@ function vAccounts(){
   html+='<div class="acctgrid">'+al.map(a=>{const b=balance(a.id),f=acctFlow(a.id,m);
     return '<a class="acct" href="#acct-'+esc(a.id)+'"><span class="top">'+acctIcon(a.type)+'<span class="nm">'+esc(a.name)+'</span>'+(b<0?'<span class="pill bad">Below zero</span>':'<span class="go" aria-hidden="true">›</span>')+'</span><span class="bal num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span><small class="num">+'+esc(money(f.inn))+' in · −'+esc(money(f.out))+' out in '+esc(mname)+'</small></a>'}).join('')
     +'<button class="acct new" data-act="new-acct"><span class="new-plus" aria-hidden="true">+</span>New account</button></div>';
-  const gone=removedAccts();
-  if(gone.length)html+='<section class="addback"><h2>ADD BACK</h2><div class="addback-row">'+gone.map(g=>'<button class="addback-chip" data-act="restore-acct" data-id="'+esc(g.id)+'">'+acctIcon(g.type,'ai sm')+'<span>+ '+esc(g.name)+'</span></button>').join('')+'</div><p class="muted" style="margin:0;font-size:12px">Removed accounts keep their history. Adding one back brings back its balance too.</p></section>';
+  // (The "Add back" row was removed on request. Removed accounts stay hidden; make a new one with + New account.)
   return html;
 }
 function balanceOn(id,d){
@@ -921,7 +920,7 @@ document.addEventListener('click',e=>{
     if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to remove';return}
     const a=S.accounts[t.dataset.id];S.accounts[t.dataset.id]=Object.assign({},a,{hidden:true});patch('accounts',t.dataset.id,{hidden:true});closeModal();if(S.acct===t.dataset.id)S.acct=null;
     if(S.view==='account')location.hash='accounts';else render();
-    toast((a?a.name:'Account')+' removed. You can add it back anytime on My money.');return}
+    toast((a?a.name:'Account')+' removed');return}
   if(act==='restore-acct'){
     const id=t.dataset.id,d=DEFAULT_ACCTS.find(x=>x[0]===id);
     if(S.accounts[id]){S.accounts[id]=Object.assign({},S.accounts[id],{hidden:false});patch('accounts',id,{hidden:false})}
