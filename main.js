@@ -23,10 +23,10 @@ function newId(){return Date.now().toString(36)+Math.random().toString(36).slice
 
 const ICON_REPEAT='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg>';
 const ICON_EDIT='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>';
-const S={db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),running:false,seeding:false,acct:null,
+const S={notes:{},checklist:{},debts:{},debtpays:{},debtTab:'owe',db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),running:false,seeding:false,acct:null,
   view:'overview',month:ym(new Date()),tab:'Virtual',sel:null,faceId:null,
   fCat:'all',fCard:'all',confirm:null,pending:false};
-const VIEWS=['overview','accounts','stats','cards','budgets','activity'];
+const VIEWS=['overview','accounts','debts','stats','cards','budgets','notes','activity'];
 const ACCT_TYPES={
   cash:{label:'Cash',color:'var(--c3)',path:'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>'},
   bank:{label:'Bank',color:'var(--c1)',path:'<path d="M3 10h18L12 4z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>'},
@@ -54,10 +54,28 @@ function acctList(){return Object.entries(S.accounts).map(([id,a])=>Object.assig
 function moveList(){return Object.entries(S.moves).map(([id,m])=>Object.assign({id},m))}
 function acctIcon(type,cls){const T=ACCT_TYPES[type]||ACCT_TYPES.other;return '<span class="'+(cls||'ai')+'" style="color:'+T.color+';background:color-mix(in srgb,'+T.color+' 15%,transparent)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+T.path+'</svg></span>'}
 /* Balance = starting amount + money added + transfers in − transfers out − expenses paid from it. */
+/* ---------- debts ---------- */
+const r2=n=>Math.round((Number(n)||0)*100)/100;
+function debtList(){return Object.entries(S.debts).map(([id,d])=>Object.assign({id},d))}
+function dpayList(){return Object.entries(S.debtpays).map(([id,p])=>Object.assign({id},p))}
+function debtPays(id){return dpayList().filter(p=>p.debtId===id).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.createdAt||0)-(a.createdAt||0))}
+function debtPaid(id){return r2(dpayList().filter(p=>p.debtId===id).reduce((t,p)=>t+(Number(p.amount)||0),0))}
+function debtLeft(d){return Math.max(0,r2((Number(d.amount)||0)-debtPaid(d.id)))}
+function debtTotals(){let owe=0,lend=0;debtList().forEach(d=>{const l=debtLeft(d);if(d.kind==='lend')lend+=l;else owe+=l});return {owe:r2(owe),lend:r2(lend)}}
+/* Every way a debt touches an account. Only payments (and an optional "money moved when it started") count. */
+function debtEffects(){
+  const out=[];
+  debtList().forEach(d=>{if(!d.startAccountId)return;const v=Number(d.amount)||0,owe=d.kind!=='lend';
+    out.push({accountId:d.startAccountId,amt:owe?v:-v,date:d.date,c:d.createdAt,title:owe?'Borrowed from '+d.person:'Lent to '+d.person,sub:'Debt'})});
+  dpayList().forEach(p=>{const d=S.debts[p.debtId];if(!d||!p.accountId)return;const v=Number(p.amount)||0,owe=d.kind!=='lend';
+    out.push({accountId:p.accountId,amt:owe?-v:v,date:p.date,c:p.createdAt,title:p.note||(owe?'Paid '+d.person:d.person+' paid you'),sub:owe?'Debt payment':'Debt repaid to you'})});
+  return out;
+}
 function balance(id){
   const a=S.accounts[id];if(!a)return 0;let b=Number(a.start)||0;
   moveList().forEach(m=>{const v=Number(m.amount)||0;if(m.kind==='transfer'){if(m.toId===id)b+=v;if(m.fromId===id)b-=v}else if(m.toId===id)b+=v});
   expList().forEach(e=>{if(e.accountId===id)b-=Number(e.amount)||0});
+  debtEffects().forEach(x=>{if(x.accountId===id)b+=x.amt});
   return Math.round(b*100)/100;
 }
 function acctFlow(id,m){
@@ -66,6 +84,7 @@ function acctFlow(id,m){
     if(x.kind==='transfer'){if(x.toId===id)inn+=v;if(x.fromId===id)out+=v}
     else if(x.toId===id){if(v>=0)inn+=v;else out-=v}});
   expList().forEach(e=>{if(e.accountId===id&&String(e.date||'').startsWith(m))out+=Number(e.amount)||0});
+  debtEffects().forEach(x=>{if(x.accountId===id&&String(x.date||'').startsWith(m)){if(x.amt>=0)inn+=x.amt;else out-=x.amt}});
   return {inn,out};
 }
 function totalMoney(){return acctList().reduce((s,a)=>s+balance(a.id),0)}
@@ -165,7 +184,7 @@ function setSync(state){
 let unsubs=[];
 function disconnect(){
   unsubs.forEach(u=>{try{u()}catch(e){}});unsubs=[];
-  Object.assign(S,{profile:null,db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),seeding:false,acct:null,lastPay:null,sel:null,faceId:null,confirm:null});
+  Object.assign(S,{profile:null,notes:{},checklist:{},debts:{},debtpays:{},db:null,live:false,cards:{},expenses:{},recurring:{},accounts:{},moves:{},settings:null,loaded:{},made:new Set(),seeding:false,acct:null,lastPay:null,sel:null,faceId:null,confirm:null});
   $('#view').innerHTML='';$('#view').dataset.view='';closeModal();
 }
 function connect(uid){
@@ -178,6 +197,10 @@ function connect(uid){
   unsubs.push(store.subscribe('recurring',onCol('recurring','rec'),fail));
   unsubs.push(store.subscribe('accounts',onCol('accounts','accts'),fail));
   unsubs.push(store.subscribe('moves',onCol('moves','moves'),fail));
+  unsubs.push(store.subscribe('debts',onCol('debts','debts'),fail));
+  unsubs.push(store.subscribe('debtpays',onCol('debtpays','dpays'),fail));
+  unsubs.push(store.subscribe('checklist',onCol('checklist','chk'),fail));
+  unsubs.push(store.subscribe('notes',onCol('notes','notes'),fail));
   unsubs.push(store.subscribeDoc('settings','moss',d=>{S.settings=d;S.loaded.set=true;render()},fail));
   unsubs.push(store.subscribeDoc('profile','main',d=>{S.profile=d;paintUser();render()},fail));
   render();
@@ -198,13 +221,13 @@ function render(){
   document.querySelectorAll('.m-label').forEach(el=>el.textContent=monthLabel(S.month,el.closest('.mtop')));
   const ex=monthExp();$('#m-total').textContent=money(sum(ex))+' this month';
   $('#greet').textContent=greeting();
-  $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',account:(S.accounts[S.pid]||{}).name||'Account',accounts:'My money',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
+  $('#today-lbl').textContent=new Date().toLocaleString('en-US',{weekday:'long',day:'numeric',month:'long'})+' · '+({overview:'Overview',debts:'Debts',notes:'Notes',account:(S.accounts[S.pid]||{}).name||'Account',accounts:'My money',stats:'Statistics',cards:'Cards',budgets:'Budgets',activity:'Activity'})[S.view];
   $('#tip').hidden=true;
   if(S.view==='cards'){renderCards();afterRender(enter);return}
   view.dataset.view=S.view;
   if(S.view==='stats'){view.innerHTML=vStats();fillStats();afterRender(enter);return}
   if(S.view==='account'){view.innerHTML=vAccount();const c=$('#ch-bal');if(c)c.innerHTML=drawBal(c.clientWidth);afterRender(enter);return}
-  view.innerHTML=S.view==='accounts'?vAccounts():S.view==='budgets'?vBudgets():S.view==='activity'?vActivity():vOverview();
+  view.innerHTML=S.view==='notes'?vNotes():S.view==='debts'?vDebts():S.view==='accounts'?vAccounts():S.view==='budgets'?vBudgets():S.view==='activity'?vActivity():vOverview();
   afterRender(enter);
 }
 
@@ -391,6 +414,9 @@ function vOverview(){
     html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>YOUR MONEY · <span class="num" style="color:var(--fg)">'+esc(money(totalMoney()))+'</span></h2><a href="#accounts" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div><div class="moneyrow">'
       +al.map(a=>{const b=balance(a.id);return '<a class="mchip" href="#acct-'+esc(a.id)+'">'+acctIcon(a.type)+'<span class="t"><span>'+esc(a.name)+'</span><b class="num'+(b<0?' neg':'')+'">'+esc(money(b))+'</b></span></a>'}).join('')+'</div></section>';
   }
+  const dt=debtTotals();
+  if(dt.owe>0||dt.lend>0)html+=debtStrip(dt);
+  html+=notesStrip();
   if(upcoming.length){
     html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>COMING UP IN '+esc(mname.toUpperCase())+'</h2><a href="#budgets" style="color:var(--accent);font-weight:700;font-size:13px">Manage</a></div><div>'
       +upcoming.map(({r,st})=>{return '<div class="txn"><span class="ic" style="color:var(--warn);background:var(--warn-soft)">'+ICON_REPEAT+'</span><div class="tx"><b>'+esc(r.note||catName(r.category))+'</b><span>'+esc(catName(r.category))+' · '+paidLabel(r)+'</span></div><span class="pill '+st.cls+'">'+esc(st.label)+'</span><span class="amt num">'+esc(money(r.amount))+'</span></div>'}).join('')
@@ -404,9 +430,9 @@ function vOverview(){
       return '<div class="catrow"><span class="nm"><span class="dot" style="background:'+catColor(c.id)+'"></span><span>'+esc(c.name)+'</span>'+pill+'</span><span class="num muted"><b style="color:var(--fg)">'+esc(money(s))+'</b>'+(b>0?' / '+esc(money(b)):'')+'</span><div class="bar"><i class="'+pctClass(pp)+'" style="width:'+Math.min(100,pp)+'%;'+(pctClass(pp)?'':'background:'+catColor(c.id))+'"></i></div></div>'}).join('')
     +(other>0?'<div class="catrow"><span class="nm"><span class="dot" style="background:var(--c8)"></span><span>Uncategorized</span></span><span class="num"><b>'+esc(money(other))+'</b></span></div>':'')
     +'</div></section>';
-  const recent=ex.slice(0,6);
-  html+='<section class="panel"><div style="display:flex;justify-content:space-between;align-items:center"><h2>RECENT</h2>'+(ex.length?'<a href="#activity" style="color:var(--accent);font-weight:700;font-size:13px">See all</a>':'')+'</div>'
-    +(recent.length?'<div>'+recent.map(e=>txnRow(e,false)).join('')+'</div>':'<div class="empty"><b>No expenses in '+esc(mname)+' yet</b>Tap Add expense to log your first one.</div>')+'</section></div>';
+  const recent=ex;
+  html+='<section class="panel recent-box"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>RECENT'+(ex.length?' · <span class="num" style="color:var(--fg)">'+ex.length+'</span>':'')+'</h2>'+(ex.length?'<a href="#activity" style="color:var(--accent);font-weight:700;font-size:13px">See all</a>':'')+'</div>'
+    +(recent.length?'<div class="recent-list" tabindex="0" aria-label="Recent expenses, scroll to see more">'+recent.map(e=>txnRow(e,false)).join('')+'</div>':'<div class="empty"><b>No expenses in '+esc(mname)+' yet</b>Tap Add expense to log your first one.</div>')+'</section></div>';
   const cl=cardList();
   if(cl.length){
     html+='<section class="panel"><h2>BY CARD</h2><div>'+cl.map(c=>{const s=sum(ex.filter(e=>e.cardId===c.id)),l=Number(c.limit)||0,pp=l>0?s/l*100:0;
@@ -431,6 +457,7 @@ function acctHistory(id,m){
     }else if(x.toId===id)rows.push({date:x.date,c:x.createdAt,amt:v,title:x.note||(x.kind==='adjust'?'Balance correction':'Money added'),sub:(x.kind==='adjust'?'Correction':'Added')+' · '+d,moveId:x.id});
   });
   expList().forEach(e=>{if(e.accountId===id&&String(e.date||'').startsWith(m))rows.push({date:e.date,c:e.createdAt,amt:-(Number(e.amount)||0),title:e.note||catName(e.category),sub:'Expense · '+catName(e.category)+(S.cards[e.cardId]?' · '+S.cards[e.cardId].name:'')+' · '+dayLabel(e.date)})});
+  debtEffects().forEach(x=>{if(x.accountId===id&&String(x.date||'').startsWith(m))rows.push({date:x.date,c:x.c,amt:x.amt,title:x.title,sub:x.sub+' · '+dayLabel(x.date)})});
   return rows.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.c||0)-(a.c||0));
 }
 function vAccounts(){
@@ -442,6 +469,7 @@ function vAccounts(){
   const tot=totalMoney();
   html+='<section class="hero" aria-label="Total money"><div class="main"><span class="muted" style="font-weight:600">Total money left</span><span class="big num'+(tot<0?' neg':'')+'">'+esc(money(tot))+'</span><span class="muted">Across '+al.length+' account'+(al.length>1?'s':'')+'</span></div>'
     +'<div class="stats"><div class="stat"><span>Came in · '+esc(mname)+'</span><b class="num" style="color:var(--accent)">+'+esc(money(tin))+'</b></div><div class="stat"><span>Went out · '+esc(mname)+'</span><b class="num">−'+esc(money(tout))+'</b></div></div></section>';
+  {const dt=debtTotals();html+=(dt.owe>0||dt.lend>0)?debtStrip(dt):'<a class="panel debt-strip" href="#debts"><span class="ds-item"><span>Debts</span><b>Track money you owe or lent</b></span><span class="go" aria-hidden="true">›</span></a>'}
   html+='<div class="acctgrid">'+al.map(a=>{const b=balance(a.id),f=acctFlow(a.id,m);
     return '<a class="acct" href="#acct-'+esc(a.id)+'"><span class="top">'+acctIcon(a.type)+'<span class="nm">'+esc(a.name)+'</span>'+(b<0?'<span class="pill bad">Below zero</span>':'<span class="go" aria-hidden="true">›</span>')+'</span><span class="bal num'+(b<0?' neg':'')+'">'+esc(money(b))+'</span><small class="num">+'+esc(money(f.inn))+' in · −'+esc(money(f.out))+' out in '+esc(mname)+'</small></a>'}).join('')
     +'<button class="acct new" data-act="new-acct">+ New account</button></div>';
@@ -451,6 +479,7 @@ function balanceOn(id,d){
   const a=S.accounts[id];if(!a)return 0;let b=Number(a.start)||0;
   moveList().forEach(m=>{if(String(m.date||'')>d)return;const v=Number(m.amount)||0;if(m.kind==='transfer'){if(m.toId===id)b+=v;if(m.fromId===id)b-=v}else if(m.toId===id)b+=v});
   expList().forEach(e=>{if(e.accountId===id&&String(e.date||'')<=d)b-=Number(e.amount)||0});
+  debtEffects().forEach(x=>{if(x.accountId===id&&String(x.date||'')<=d)b+=x.amt});
   return b;
 }
 function acctBills(id){return recList().filter(r=>{const c=S.cards[r.cardId];return r.cardId&&c?c.accountId===id:r.accountId===id})}
@@ -509,6 +538,61 @@ function drawBal(W){
     s+='<rect x="'+(X(i)-step/2)+'" y="'+top+'" width="'+step+'" height="'+ih+'" fill="transparent" data-cross="bal-cross" data-cx="'+X(i)+'" data-tip="'+esc(dayLabel(d)+': '+money(vals[i])+(chg?' ('+(chg>0?'+':'−')+money(Math.abs(chg))+')':''))+'"/>'}
   return s+'</svg>';
 }
+const DEBT_TXT={
+  owe:{tab:'I owe',add:'I owe someone',pay:'Pay',payTitle:'Pay ',acct:'Pay from',start:'I received the money in',verb:'Paid',empty:'You don\'t owe anyone. Nice!',emptySub:'Add a debt when you borrow money, so you remember to pay it back.'},
+  lend:{tab:'Owed to me',add:'Someone owes me',pay:'Receive payment',payTitle:'Payment from ',acct:'Put it in',start:'I gave the money from',verb:'Received',empty:'Nobody owes you right now',emptySub:'Add one when you lend money, so you remember who still has to pay you back.'}};
+function daysUntil(d){const [y,m,dd]=d.split('-').map(Number),t=new Date(),a=Date.UTC(y,m-1,dd),b=Date.UTC(t.getFullYear(),t.getMonth(),t.getDate());return Math.round((a-b)/864e5)}
+function dueBadge(d,left){
+  if(!d.due||left<=0)return '';
+  const n=daysUntil(d.due);
+  if(n<0)return '<span class="pill bad">Overdue '+(-n)+' day'+(n===-1?'':'s')+'</span>';
+  if(n===0)return '<span class="pill warn">Due today</span>';
+  if(n<=7)return '<span class="pill warn">Due in '+n+' day'+(n===1?'':'s')+'</span>';
+  return '<span class="pill">Due '+esc(dayLabel(d.due))+'</span>';
+}
+function debtCard(d){
+  const T=DEBT_TXT[d.kind==='lend'?'lend':'owe'],left=debtLeft(d),total=Number(d.amount)||0,paid=r2(total-left),pct=total>0?Math.min(100,paid/total*100):0,done=left<=0;
+  const pays=debtPays(d.id);
+  const del=S.confirm==='debt:'+d.id
+    ?'<span class="confirm-inline"><span>Delete this debt'+(pays.length?' and its '+pays.length+' payment'+(pays.length>1?'s':''):'')+'?</span><button class="btn small danger solid" data-act="del-debt" data-id="'+esc(d.id)+'">Delete</button><button class="btn small" data-act="cancel">Keep</button></span>'
+    :'<button class="iconbtn" data-act="ask" data-key="debt:'+esc(d.id)+'" aria-label="Delete debt with '+esc(d.person)+'">'+ICON_TRASH+'</button>';
+  let h='<article class="debt'+(done?' done':'')+' '+(d.kind==='lend'?'lend':'owe')+'">'
+    +'<div class="debt-top"><span class="debt-av" aria-hidden="true">'+esc((d.person||'?').trim()[0]||'?').toUpperCase()+'</span>'
+    +'<div class="debt-who"><b>'+esc(d.person)+'</b><span>'+(d.note?esc(d.note)+' · ':'')+'Since '+esc(dayLabel(d.date))+'</span></div>'
+    +'<div class="debt-amt"><b class="num">'+(done?'Paid off':esc(money(left)))+'</b><span class="num">'+(done?esc(money(total))+' total':'left of '+esc(money(total)))+'</span></div></div>'
+    +'<div class="bar"><i style="width:'+pct+'%"></i></div>'
+    +'<div class="debt-meta">'+(done?'<span class="pill ok">✓ Settled</span>':dueBadge(d,left))+(paid>0&&!done?'<span class="muted num">'+T.verb+' '+esc(money(paid))+' so far</span>':'')+(d.startAccountId?'<span class="muted">'+(d.kind==='lend'?'Given from ':'Received in ')+esc(acctName(d.startAccountId))+'</span>':'')+'</div>'
+    +'<div class="debt-actions">'+(done?'':'<button class="btn small primary" data-act="debt-pay" data-id="'+esc(d.id)+'">'+T.pay+'</button>')+'<button class="btn small" data-act="debt-edit" data-id="'+esc(d.id)+'">'+ICON_EDIT+'Edit</button>'+del+'</div>';
+  if(pays.length){
+    h+='<details class="debt-pays"'+(S.openDebt===d.id?' open':'')+' data-debt="'+esc(d.id)+'"><summary>'+pays.length+' payment'+(pays.length>1?'s':'')+'</summary><div>'
+      +pays.map(p=>{const dl=S.confirm==='dpay:'+p.id
+        ?'<button class="btn small danger solid" data-act="del-dpay" data-id="'+esc(p.id)+'">Delete</button><button class="btn small" data-act="cancel">Keep</button>'
+        :'<button class="iconbtn" data-act="ask" data-key="dpay:'+esc(p.id)+'" aria-label="Delete payment">'+ICON_TRASH+'</button>';
+        return '<div class="txn"><div class="tx"><b class="num">'+(d.kind==='lend'?'+':'−')+esc(money(p.amount))+'</b><span>'+esc(dayLabel(p.date))+' · '+(p.accountId?(d.kind==='lend'?'into ':'from ')+esc(acctName(p.accountId)):'not linked to an account')+(p.note?' · '+esc(p.note):'')+'</span></div>'+dl+'</div>'}).join('')
+      +'</div></details>';
+  }
+  return h+'</article>';
+}
+function debtStrip(dt){
+  const next=debtList().filter(d=>debtLeft(d)>0&&d.due).sort((a,b)=>a.due.localeCompare(b.due))[0];
+  return '<a class="panel debt-strip" href="#debts"><span class="ds-item"><span>You owe</span><b class="num">'+esc(money(dt.owe))+'</b></span><span class="ds-item"><span>Owed to you</span><b class="num" style="color:var(--accent)">'+esc(money(dt.lend))+'</b></span>'
+    +(next?'<span class="ds-next">'+dueBadge(next,debtLeft(next))+'<span class="muted">'+esc(next.person)+' · '+esc(money(debtLeft(next)))+'</span></span>':'')+'<span class="go" aria-hidden="true">›</span></a>';
+}
+function vDebts(){
+  const t=debtTotals(),tab=S.debtTab==='lend'?'lend':'owe',T=DEBT_TXT[tab];
+  const all=debtList().sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')||(b.createdAt||0)-(a.createdAt||0));
+  const mine=all.filter(d=>(d.kind==='lend'?'lend':'owe')===tab),active=mine.filter(d=>debtLeft(d)>0),settled=mine.filter(d=>debtLeft(d)<=0);
+  const count=k=>all.filter(d=>(d.kind==='lend'?'lend':'owe')===k&&debtLeft(d)>0).length,net=r2(t.lend-t.owe);
+  let html='<div class="headrow"><div><h1>Debts</h1><p>Money you owe and money owed to you. Your accounts only change when a payment is made.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-act="debt-new" data-kind="'+tab+'">+ '+T.add+'</button></div></div>';
+  html+='<section class="hero debt-hero" aria-label="Debt totals"><div class="main"><span class="muted" style="font-weight:600">You still owe</span><span class="big num">'+esc(money(t.owe))+'</span><span class="muted">'+count('owe')+' open debt'+(count('owe')===1?'':'s')+'</span></div>'
+    +'<div class="main"><span class="muted" style="font-weight:600">Owed to you</span><span class="big num">'+esc(money(t.lend))+'</span><span class="muted">'+count('lend')+' '+(count('lend')===1?'person':'people')+' still to pay</span></div>'
+    +'<div class="stats"><div class="stat"><span>Net</span><b class="num" style="color:'+(net<0?'var(--bad)':'var(--accent)')+'">'+(net<0?'−':'+')+esc(money(Math.abs(net)))+'</b></div></div></section>';
+  html+='<div class="tabs" role="tablist" aria-label="Debt type">'+['owe','lend'].map(k=>'<button role="tab" aria-selected="'+(tab===k)+'" data-act="debt-tab" data-tab="'+k+'">'+DEBT_TXT[k].tab+'<em>'+count(k)+'</em></button>').join('')+'</div>';
+  if(!active.length&&!settled.length)return html+'<div class="empty"><b>'+T.empty+'</b>'+T.emptySub+'<div style="margin-top:12px"><button class="btn primary" data-act="debt-new" data-kind="'+tab+'">+ '+T.add+'</button></div></div>';
+  html+=active.length?'<div class="debtlist">'+active.map(debtCard).join('')+'</div>':'<div class="empty"><b>All paid off</b>Nothing left open here.</div>';
+  if(settled.length)html+='<details class="panel settled"'+(S.showSettled?' open':'')+'><summary><h2>PAID OFF · '+settled.length+'</h2></summary><div class="debtlist">'+settled.map(debtCard).join('')+'</div></details>';
+  return html;
+}
 function vActivity(){
   let ex=monthExp();
   if(S.fCat!=='all')ex=ex.filter(e=>e.category===S.fCat);
@@ -522,9 +606,66 @@ function vActivity(){
   return html;
 }
 
+/* ---------- notes & bills checklist (a to-do list: never changes your money) ---------- */
+function chkList(){return Object.entries(S.checklist).map(([id,c])=>Object.assign({id},c))}
+function chkDone(c,m){return c.monthly!==false?(c.paidMonths||[]).includes(m):!!c.done}
+function chkVisible(c,m){return c.monthly!==false?(!c.startMonth||m>=c.startMonth):true}
+function noteList(){return Object.entries(S.notes).map(([id,n])=>Object.assign({id},n)).sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||(b.updatedAt||0)-(a.updatedAt||0))}
+function chkSummary(m){const items=chkList().filter(c=>chkVisible(c,m)),done=items.filter(c=>chkDone(c,m));
+  return {total:items.length,done:done.length,left:r2(items.filter(c=>!chkDone(c,m)).reduce((t,c)=>t+(Number(c.amount)||0),0)),all:r2(items.reduce((t,c)=>t+(Number(c.amount)||0),0))}}
+function notesStrip(){
+  const sm=chkSummary(S.month),n=Object.keys(S.notes).length,mname=monthLabel(S.month).split(' ')[0];
+  return '<a class="panel debt-strip notes-strip" href="#notes"><span class="ds-item"><span>Bills checklist · '+esc(mname)+'</span><b>'+(sm.total?sm.done+' of '+sm.total+' paid':'Write down what to pay')+'</b></span>'
+    +(sm.total?'<span class="ds-item"><span>Left to pay</span><b class="num">'+esc(money(sm.left))+'</b></span>':'')
+    +'<span class="ds-item"><span>Notes</span><b class="num">'+n+'</b></span><span class="go" aria-hidden="true">›</span></a>';
+}
+function vNotes(){
+  const m=S.month,mname=monthLabel(m).split(' ')[0],sm=chkSummary(m);
+  const items=chkList().filter(c=>chkVisible(c,m)).sort((a,b)=>(chkDone(a,m)?1:0)-(chkDone(b,m)?1:0)||(a.day||99)-(b.day||99)||(a.createdAt||0)-(b.createdAt||0));
+  let html='<div class="headrow"><div><h1>Notes</h1><p>A checklist for bills you pay each month, plus notes. This is just for you to keep track; it doesn\'t change your money.</p></div><button class="btn primary" data-act="note-new">+ New note</button></div>';
+  const pct=sm.total?Math.round(sm.done/sm.total*100):0;
+  html+='<section class="panel chk-panel"><div class="chk-head"><div><h2>BILLS CHECKLIST · '+esc(mname.toUpperCase())+'</h2>'
+    +(sm.total?'<b class="num chk-count">'+sm.done+' of '+sm.total+' paid</b><span class="muted num"> · '+esc(money(sm.left))+' left of '+esc(money(sm.all))+'</span>':'<span class="muted">Add the bills you need to pay each month and tick them off.</span>')+'</div>'
+    +(sm.total?'<span class="chk-ring" style="--p:'+pct+'" aria-label="'+pct+'% done"><span class="num">'+pct+'%</span></span>':'')+'</div>'
+    +(sm.total?'<div class="bar"><i style="width:'+pct+'%"></i></div>':'');
+  html+='<ul class="chk-list">'+items.map(c=>{const done=chkDone(c,m),day=c.day?Math.min(c.day,dim(m)):0;
+      const late=!done&&day&&m===ym(new Date())&&day<new Date().getDate(),soon=!done&&day&&m===ym(new Date())&&day>=new Date().getDate()&&day-new Date().getDate()<=3;
+      return '<li class="chk'+(done?' done':'')+'"><button class="chk-box" data-act="chk" data-id="'+esc(c.id)+'" aria-pressed="'+done+'" aria-label="'+(done?'Mark not paid: ':'Mark paid: ')+esc(c.title)+'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg></button>'
+        +'<button class="chk-text" data-act="chk-edit" data-id="'+esc(c.id)+'"><b>'+esc(c.title)+'</b><span>'+[c.monthly===false?(day?'One time · due the '+ordinal(c.day):'One time'):(day?'Every month on the '+ordinal(c.day):'Every month'),c.note?esc(c.note):''].filter(Boolean).join(' · ')+'</span></button>'
+        +(late?'<span class="pill bad">Late</span>':soon?'<span class="pill warn">Soon</span>':'')
+        +(Number(c.amount)>0?'<span class="num chk-amt">'+esc(money(c.amount))+'</span>':'')+'</li>'}).join('')+'</ul>';
+  html+='<form id="f-chk-add" class="chk-add" novalidate><label class="sr" for="ck-title">New item</label><input id="ck-title" class="input" maxlength="60" placeholder="Add a bill, e.g. Electricity" autocomplete="off">'
+    +'<label class="sr" for="ck-amt">Amount</label><input id="ck-amt" class="input num" type="number" inputmode="decimal" min="0" step="any" placeholder="Amount">'
+    +'<label class="sr" for="ck-day">Due day</label><select id="ck-day" class="input"><option value="">Due day</option>'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'">'+ordinal(i+1)+'</option>').join('')+'</select>'
+    +'<button class="btn primary" type="submit">Add</button></form>'
+    +'<p class="muted" style="margin:0;font-size:12px">Ticks reset each month, so the same list is ready for next month. Tap an item to edit it or make it one-time.</p></section>';
+  const notes=noteList();
+  html+='<section class="notes-sec"><div class="notes-head"><h2>NOTES'+(notes.length?' · '+notes.length:'')+'</h2></div>'
+    +(notes.length?'<div class="notes-grid">'+notes.map(n=>'<button class="note'+(n.pinned?' pinned':'')+'" data-act="note-edit" data-id="'+esc(n.id)+'">'+(n.pinned?'<span class="pin" aria-label="Pinned"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15 3l6 6-3 1-4 4 1 5-2 2-4-4-5 5-1-1 5-5-4-4 2-2 5 1 4-4z"/></svg></span>':'')+(n.title?'<b>'+esc(n.title)+'</b>':'')+'<p>'+esc(n.body||'')+'</p><span class="muted">'+esc(new Date(n.updatedAt||n.createdAt||Date.now()).toLocaleDateString('en-US',{month:'short',day:'numeric'}))+'</span></button>').join('')+'</div>'
+      :'<div class="empty"><b>No notes yet</b>Write anything down: reminders, account numbers to check, shopping lists.<div style="margin-top:12px"><button class="btn primary" data-act="note-new">+ New note</button></div></div>')+'</section>';
+  return html;
+}
+function openChk(id){
+  const c=S.checklist[id];if(!c)return;
+  openModal('<h2>Edit item</h2><form id="f-chk" data-id="'+esc(id)+'" novalidate>'
+   +'<label class="field" for="ce-title">Name<input id="ce-title" class="input" maxlength="60" value="'+esc(c.title)+'" required></label>'
+   +'<div class="two"><label class="field" for="ce-amt">Amount ('+esc(cur())+')<input id="ce-amt" class="input num" type="number" inputmode="decimal" min="0" step="any" value="'+(Number(c.amount)>0?esc(c.amount):'')+'" placeholder="Optional"></label>'
+   +'<label class="field" for="ce-day">Due day<select id="ce-day" class="input"><option value="">None</option>'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'"'+(c.day===i+1?' selected':'')+'>'+ordinal(i+1)+'</option>').join('')+'</select></label></div>'
+   +'<label class="field" for="ce-rep">Repeats<select id="ce-rep" class="input"><option value="m"'+(c.monthly!==false?' selected':'')+'>Every month (ticks reset each month)</option><option value="o"'+(c.monthly===false?' selected':'')+'>One time only</option></select></label>'
+   +'<label class="field" for="ce-note">Note<input id="ce-note" class="input" maxlength="80" value="'+esc(c.note||'')+'" placeholder="e.g. Pay at 7-Eleven, account no. on the bill"></label>'
+   +'<p class="err" id="ce-err" hidden></p><div class="actions"><button type="button" class="btn danger" data-act="chk-del" data-id="'+esc(id)+'" style="margin-right:auto">'+ICON_TRASH+'Delete</button><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">Save</button></div></form>','#ce-title');
+}
+function openNote(id){
+  const n=id&&S.notes[id]?S.notes[id]:null;
+  openModal('<h2>'+(n?'Edit note':'New note')+'</h2><form id="f-note" data-id="'+esc(id||'')+'" novalidate>'
+   +'<label class="field" for="nt-title">Title<input id="nt-title" class="input" maxlength="60" value="'+esc(n&&n.title||'')+'" placeholder="Optional"></label>'
+   +'<label class="field" for="nt-body">Note<textarea id="nt-body" class="input note-area" maxlength="4000" rows="8" placeholder="Write anything…">'+esc(n&&n.body||'')+'</textarea></label>'
+   +'<label class="nt-pin" for="nt-pin"><input type="checkbox" id="nt-pin"'+(n&&n.pinned?' checked':'')+'> Pin to the top</label>'
+   +'<p class="err" id="nt-err" hidden></p><div class="actions">'+(n?'<button type="button" class="btn danger" data-act="note-del" data-id="'+esc(id)+'" style="margin-right:auto">'+ICON_TRASH+'Delete</button>':'')+'<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">Save note</button></div></form>',n?'#nt-body':'#nt-title');
+}
 function vBudgets(){
   const ex=monthExp(),cs=cats(),total=cs.reduce((s,c)=>s+(Number(c.budget)||0),0);
-  let html=localBanner()+'<div class="headrow"><div><h1>Budgets</h1><p>Set how much you plan to spend each month. Changes save when you leave a field.</p></div><span class="num" style="font-size:18px;font-weight:800">'+esc(money(total))+' / month</span></div>';
+  let html=localBanner()+'<div class="headrow"><div><h1>Budgets</h1><p>Set how much you plan to spend each month. Changes save when you leave a field.</p></div><span class="num" style="font-size:18px;font-weight:800">'+esc(money(total))+' / month</span></div>'+notesStrip();
   const rl=recList(),recTotal=rl.filter(r=>r.active!==false).reduce((s,r)=>s+(Number(r.amount)||0)/every(r),0);
   html+='<section class="panel"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px"><div><h2>RECURRING</h2><p class="muted" style="margin:4px 0 0;font-size:13px">Logged for you on their day, every month or every few months'+(rl.length?' · about <b class="num" style="color:var(--fg)">'+esc(money(recTotal))+'</b> a month':'')+'</p></div><button class="btn small primary" data-act="add-rec">'+ICON_REPEAT+'Add recurring</button></div>'
     +(rl.length?'<div>'+rl.map(r=>{const st=recStatus(r,S.month),card=S.cards[r.cardId],paused=r.active===false;
@@ -570,7 +711,7 @@ function renderCards(){
   if(!list.find(c=>c.id===S.sel))S.sel=list[0]?list[0].id:null;
   const ex=monthExp();
   $('#cv-list').innerHTML=list.length?list.map(c=>'<button class="thumb'+(c.frozen?' frozen':'')+'" data-act="pick" data-id="'+c.id+'" aria-pressed="'+(S.sel===c.id)+'"><span class="mini" style="background:'+(CARD_BG[c.color]||CARD_BG.green)+'"></span><span class="t"><b>'+esc(c.name)+'</b><span>'+esc(c.kind)+' ··'+esc(c.last4||'')+'</span></span>'+(c.frozen?'<span class="pill ice">Frozen</span>':'')+'</button>').join(''):'<div class="empty" style="width:100%"><b>No '+S.tab.toLowerCase()+' cards</b>'+(S.tab==='Virtual'?'Create one with New virtual card.':'Add one with New virtual card and pick Physical.')+'</div>';
-  const c=S.cards[S.sel];
+  const c=S.cards[S.sel]?Object.assign({id:S.sel},S.cards[S.sel]):null;
   $('#cv-main').hidden=!c;
   if(!c)return;
   const face=$('#cv-face'),frost=$('#cv-frost');
@@ -669,6 +810,34 @@ function squarePhoto(file){
     img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('read'))};img.src=url;
   });
 }
+function personList(){return [...new Set(debtList().map(d=>String(d.person||'').trim()).filter(Boolean))].sort()}
+function openDebt(kind,id){
+  const d=id&&S.debts[id]?Object.assign({id},S.debts[id]):null;kind=d?(d.kind==='lend'?'lend':'owe'):(kind==='lend'?'lend':'owe');const T=DEBT_TXT[kind];
+  const paid=d?debtPaid(d.id):0;
+  openModal('<h2>'+(d?'Edit debt':(kind==='lend'?'Someone owes me':'I owe someone'))+'</h2><form id="f-debt" data-id="'+esc(id||'')+'" data-kind="'+kind+'" novalidate>'
+   +'<label class="field" for="d-person">'+(kind==='lend'?'Who owes you?':'Who do you owe?')+'<input id="d-person" class="input" maxlength="40" list="d-people" autocomplete="off" placeholder="e.g. Juan" value="'+esc(d?d.person:'')+'" required><datalist id="d-people">'+personList().map(n=>'<option value="'+esc(n)+'">').join('')+'</datalist></label>'
+   +'<label class="field" for="d-amt">Amount ('+esc(cur())+')<input id="d-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="'+(d?esc(d.amount):'')+'" required></label>'
+   +'<label class="field" for="d-note">What for<input id="d-note" class="input" maxlength="60" placeholder="'+(kind==='lend'?'e.g. Lent for rent':'e.g. Borrowed for phone')+'" value="'+esc(d&&d.note||'')+'"></label>'
+   +'<div class="two"><label class="field" for="d-date">Date<input id="d-date" class="input" type="date" value="'+esc(d?d.date:today())+'" required></label>'
+   +'<label class="field" for="d-due">Pay back by (optional)<input id="d-due" class="input" type="date" value="'+esc(d&&d.due||'')+'"></label></div>'
+   +(d?(paid>0?'<p class="muted" style="margin:0;font-size:12px">'+T.verb+' '+esc(money(paid))+' so far. The amount can\'t go below that.</p>':'')
+      :'<label class="field" for="d-start">Did money move now?<select id="d-start" class="input"><option value="">No, just keep a record</option>'+acctList().map(a=>'<option value="'+esc(a.id)+'">Yes, '+T.start+' '+esc(a.name)+'</option>').join('')+'</select></label>'
+       +'<p class="muted" style="margin:0;font-size:12px">'+(kind==='lend'?'Your money goes up only when they pay you back.':'Your money goes down only when you pay it back.')+'</p>')
+   +'<p class="err" id="d-err" hidden></p><div class="actions"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(d?'Save':'Add debt')+'</button></div></form>','#d-person');
+}
+function openDebtPay(id){
+  const d=S.debts[id]?Object.assign({id},S.debts[id]):null;if(!d)return;
+  const kind=d.kind==='lend'?'lend':'owe',T=DEBT_TXT[kind],left=debtLeft(d);
+  const def=d.startAccountId&&S.accounts[d.startAccountId]?d.startAccountId:(S.accounts.cash?'cash':(acctList()[0]||{}).id);
+  openModal('<h2>'+T.payTitle+esc(d.person)+'</h2><form id="f-dpay" data-id="'+esc(id)+'" novalidate>'
+   +'<p class="muted" style="margin:0">'+esc(money(left))+' left of '+esc(money(d.amount))+(d.note?' · '+esc(d.note):'')+'</p>'
+   +'<label class="field" for="dp-amt">Amount ('+esc(cur())+')<input id="dp-amt" class="input amount num" type="number" inputmode="decimal" min="0" step="any" value="'+left+'" required></label>'
+   +'<div class="presets"><button type="button" data-act="dp-fill" data-v="'+left+'">Full · '+esc(money(left))+'</button><button type="button" data-act="dp-fill" data-v="'+r2(left/2)+'">Half · '+esc(money(r2(left/2)))+'</button></div>'
+   +'<div class="two"><label class="field" for="dp-acct">'+T.acct+'<select id="dp-acct" class="input">'+acctOptions(def)+'<option value="">Not tracked</option></select></label>'
+   +'<label class="field" for="dp-date">Date<input id="dp-date" class="input" type="date" value="'+today()+'" required></label></div>'
+   +'<label class="field" for="dp-note">Note<input id="dp-note" class="input" maxlength="60" placeholder="Optional"></label>'
+   +'<p class="err" id="dp-err" hidden></p><div class="actions"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">'+(kind==='lend'?'Add payment':'Pay '+esc(d.person))+'</button></div></form>','#dp-amt');
+}
 function startOptions(day){
   return monthOptions(day,null);
 }
@@ -731,6 +900,22 @@ document.addEventListener('click',e=>{
     if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to delete';return}
     const a=S.accounts[t.dataset.id];del('accounts',t.dataset.id);closeModal();if(S.acct===t.dataset.id)S.acct=null;if(S.view==='account')location.hash='accounts';
     toast((a?a.name:'Account')+' deleted. Its past expenses stay in Activity.');return}
+  if(act==='chk'){const c=S.checklist[t.dataset.id];if(!c)return;
+    if(c.monthly!==false){const pm=new Set(c.paidMonths||[]);const was=pm.has(S.month);was?pm.delete(S.month):pm.add(S.month);const v=[...pm].sort();S.checklist[t.dataset.id]=Object.assign({},c,{paidMonths:v});patch('checklist',t.dataset.id,{paidMonths:v});if(!was)toast('✓ '+c.title+' paid for '+monthLabel(S.month).split(' ')[0])}
+    else{S.checklist[t.dataset.id]=Object.assign({},c,{done:!c.done});patch('checklist',t.dataset.id,{done:!c.done})}
+    render();return}
+  if(act==='chk-edit'){openChk(t.dataset.id);return}
+  if(act==='chk-del'){if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to delete';return}const c=S.checklist[t.dataset.id];delete S.checklist[t.dataset.id];del('checklist',t.dataset.id);closeModal();toast((c?c.title:'Item')+' deleted');render();return}
+  if(act==='note-new'){openNote(null);return}
+  if(act==='note-edit'){openNote(t.dataset.id);return}
+  if(act==='note-del'){if(!t.dataset.armed){t.dataset.armed='1';t.innerHTML=ICON_TRASH+'Tap again to delete';return}delete S.notes[t.dataset.id];del('notes',t.dataset.id);closeModal();toast('Note deleted');render();return}
+  if(act==='debt-tab'){S.debtTab=t.dataset.tab;S.confirm=null;render();return}
+  if(act==='debt-new'){openDebt(t.dataset.kind||S.debtTab,null);return}
+  if(act==='debt-edit'){openDebt(null,t.dataset.id);return}
+  if(act==='debt-pay'){openDebtPay(t.dataset.id);return}
+  if(act==='dp-fill'){$('#dp-amt').value=t.dataset.v;return}
+  if(act==='del-debt'){S.confirm=null;const d=S.debts[t.dataset.id];debtPays(t.dataset.id).forEach(p=>del('debtpays',p.id));del('debts',t.dataset.id);toast('Debt with '+(d?d.person:'them')+' deleted. Account balances are updated.');return}
+  if(act==='del-dpay'){S.confirm=null;const p=S.debtpays[t.dataset.id];if(p)S.openDebt=p.debtId;del('debtpays',t.dataset.id);toast('Payment deleted. The amount is back on the debt.');return}
   if(act==='profile'){openProfile();return}
   if(act==='photo-remove'){S.draftPhoto='none';paintAvatar($('#p-av'),$('#p-name').value||profileName(),'');t.hidden=true;return}
   if(act==='add-rec'){openRec(null);return}
@@ -821,6 +1006,53 @@ document.addEventListener('submit',e=>{
     put('accounts',nid,{name,type,start:Math.round(bal*100)/100,order,createdAt:Date.now()});
     S.acct=nid;closeModal();toast(name+' created');render();return;
   }
+  if(f.id==='f-chk-add'){
+    const title=$('#ck-title').value.trim().slice(0,60);if(!title){$('#ck-title').focus();toast('Type what you need to pay first.');return}
+    const amt=parseFloat($('#ck-amt').value),day=Number($('#ck-day').value)||0,id=newId();
+    const data={title,amount:amt>0?r2(amt):0,day,monthly:true,paidMonths:[],done:false,note:'',startMonth:S.month,createdAt:Date.now()};
+    if(document.activeElement)document.activeElement.blur();
+    S.checklist[id]=data;put('checklist',id,data);render();toast(title+' added to your checklist');return;
+  }
+  if(f.id==='f-chk'){
+    const id=f.dataset.id,title=$('#ce-title').value.trim().slice(0,60);if(!title){const e=$('#ce-err');e.textContent='Give it a name.';e.hidden=false;return}
+    const amt=parseFloat($('#ce-amt').value),data={title,amount:amt>0?r2(amt):0,day:Number($('#ce-day').value)||0,monthly:$('#ce-rep').value==='m',note:$('#ce-note').value.trim()};
+    S.checklist[id]=Object.assign({},S.checklist[id],data);patch('checklist',id,data);closeModal();toast(title+' saved');render();return;
+  }
+  if(f.id==='f-note'){
+    const id=f.dataset.id,title=$('#nt-title').value.trim().slice(0,60),body=$('#nt-body').value.replace(/\s+$/,'').slice(0,4000),pinned=$('#nt-pin').checked;
+    if(!title&&!body.trim()){const e=$('#nt-err');e.textContent='Write something first.';e.hidden=false;$('#nt-body').focus();return}
+    const now=Date.now();
+    if(id){const data={title,body,pinned,updatedAt:now};S.notes[id]=Object.assign({},S.notes[id],data);patch('notes',id,data)}
+    else{const nid=newId(),data={title,body,pinned,createdAt:now,updatedAt:now};S.notes[nid]=data;put('notes',nid,data)}
+    closeModal();toast('Note saved');render();return;
+  }
+  if(f.id==='f-debt'){
+    const id=f.dataset.id,kind=f.dataset.kind,person=$('#d-person').value.trim().slice(0,40),amt=r2(parseFloat($('#d-amt').value)),date=$('#d-date').value,due=$('#d-due').value,err=$('#d-err');
+    const fail=(m,sel)=>{err.textContent=m;err.hidden=false;if(sel)$(sel).focus()};
+    if(!person)return fail(kind==='lend'?'Who owes you? Type their name.':'Who do you owe? Type their name.','#d-person');
+    if(!(amt>0))return fail('Enter an amount above zero.','#d-amt');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return fail('Pick a date.');
+    if(due&&due<date)return fail('The pay-back date can\'t be before the debt date.');
+    const data={person,amount:amt,note:$('#d-note').value.trim(),date,due:due||''};
+    if(id){const paid=debtPaid(id);if(amt<paid)return fail('The amount can\'t be less than the '+money(paid)+' already '+(kind==='lend'?'received':'paid')+'.','#d-amt');
+      patch('debts',id,data);closeModal();toast('Debt with '+person+' updated');return}
+    const startAccountId=$('#d-start').value;
+    S.debtTab=kind;put('debts',newId(),Object.assign(data,{kind,startAccountId,createdAt:Date.now()}));closeModal();
+    toast(kind==='lend'?person+' owes you '+money(amt)+(startAccountId?' · taken from '+acctName(startAccountId):''):'You owe '+person+' '+money(amt)+(startAccountId?' · added to '+acctName(startAccountId):''));
+    if(S.view!=='debts')location.hash='debts';else render();return;
+  }
+  if(f.id==='f-dpay'){
+    const id=f.dataset.id,d=S.debts[id];if(!d){closeModal();return}
+    const dd=Object.assign({id},d),left=debtLeft(dd),amt=r2(parseFloat($('#dp-amt').value)),date=$('#dp-date').value,acc=$('#dp-acct').value,err=$('#dp-err');
+    const fail=m=>{err.textContent=m;err.hidden=false};
+    if(!(amt>0))return fail('Enter an amount above zero.');
+    if(amt>left+0.001)return fail('That\'s more than the '+money(left)+' left.');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return fail('Pick a date.');
+    put('debtpays',newId(),{debtId:id,amount:amt,accountId:acc,date,note:$('#dp-note').value.trim(),createdAt:Date.now()});
+    S.openDebt=id;closeModal();const rest=r2(left-amt),owe=d.kind!=='lend';
+    toast((owe?'Paid '+d.person+' '+money(amt):d.person+' paid you '+money(amt))+(acc?' · '+(owe?'from ':'into ')+acctName(acc):'')+(rest>0?' · '+money(rest)+' left':' · all settled ✓'));
+    render();return;
+  }
   if(f.id==='f-prof'){
     const name=$('#p-name').value.trim().slice(0,40),nick=$('#p-nick').value.trim().slice(0,20);
     const data={name,updatedAt:Date.now()};
@@ -865,6 +1097,7 @@ document.addEventListener('input',e=>{
     $('#cv-lim').textContent=v>0?money(v):'no limit';const b=$('#cv-bar');b.className=pctClass(pp);b.style.width=Math.min(100,pp)+'%';t.setAttribute('aria-valuetext',money(v))}
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#modal').innerHTML)closeModal()});
+document.addEventListener('toggle',e=>{const el=e.target;if(!el.matches)return;if(el.matches('details.debt-pays'))S.openDebt=el.open?el.dataset.debt:(S.openDebt===el.dataset.debt?null:S.openDebt);if(el.matches('details.settled'))S.showSettled=el.open},true);
 function showTip(e){
   const t=e.target.closest&&e.target.closest('[data-tip]'),tip=$('#tip');
   document.querySelectorAll('[id$="-cross"]').forEach(l=>l.setAttribute('visibility','hidden'));
